@@ -1,4 +1,4 @@
-## This generates a series of injection tests using synthetic stars an DIBs in real sky fiber/continuum observations in order to test and calibrate the apMADGICS pipeline.
+## This generates a series of injection tests using synthetic stars an DIBs in real sky fiber/continuum observations in order to test and calibrate the arMADGICS pipeline.
 # Author - Andrew Saydjari, CfA
 
 import Pkg; using Dates; t0 = now(); t_then = t0;
@@ -66,7 +66,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
     prior_dict["inject_cache_dir"] = prior_dir*"2024_03_11/inject_local_cache_15672only_295_real/"
     prior_dict["local_cache"] = prior_dir*"2024_03_11/local_cache_inject_real/"
 
-    prior_dict["past_run"] = prior_dir*"2024_03_08/outdir_wu_295_LocMean/apMADGICS_out.h5" # use component decomp to only inject into star component
+    prior_dict["past_run"] = prior_dir*"2024_03_08/outdir_wu_295_LocMean/arMADGICS_out.h5" # use component decomp to only inject into star component
     prior_dict["past_runlst"] = prior_dir*"2024_01_19/outlists/dr17_dr17_star_input_lst_msked_"
     prior_dict["map2visit"] = prior_dir*"2024_03_05/outlists/summary/dr17_dr17_map2visit_1indx.h5"
     prior_dict["map2star"] = prior_dir*"2024_03_05/outlists/summary/dr17_dr17_map2star_1indx.h5"
@@ -358,7 +358,7 @@ close(f)
 @everywhere take_draw_partial(ovtup) = take_draw(ovtup,dib_center_lambda_lst=dib_center_lambda_lst,inject_cache_dir=prior_dict["inject_cache_dir"],cache_dir=prior_dict["local_cache"])
 pout = @showprogress pmap(take_draw_partial,itarg);
 
-## Write out runlist needed to run the apMADGICS.jl on it
+## Write out runlist needed to run the arMADGICS.jl on it
 input_lst = []
 starcache_lst = []
 for (subindx, subout) in enumerate(pout)

@@ -1,4 +1,4 @@
-using apMADGICS #Why isn't LowRankOps loaded here?
+using arMADGICS #Why isn't LowRankOps loaded here?
 using Test, Random
 
 using FITSIO, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays, Interpolations, SparseArrays, ParallelDataTransfer

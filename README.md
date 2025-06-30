@@ -1,7 +1,7 @@
-# apMADGICS <img src="docs/src/assets/logo.png" alt="MADGICS Logo" width="100" align="right"/>
+# arMADGICS <img src="docs/src/assets/logo.png" alt="MADGICS Logo" width="100" align="right"/>
 
-[![Build Status](https://github.com/andrew-saydjari/apMADGICS.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/apMADGICS.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Coverage](https://codecov.io/gh/andrew-saydjari/apMADGICS.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/andrew-saydjari/apMADGICS.jl)
+[![Build Status](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/andrew-saydjari/arMADGICS.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/andrew-saydjari/arMADGICS.jl)
 
 
 Pipeline for APOGEE spectra using Marginalized Analytic Dataspace Gaussian Inference for Component Separation (MADGICS).
@@ -14,7 +14,7 @@ If you wish to download the code and have the dependencies required to run it in
 
 ```julia
 import Pkg
-Pkg.add(url="https://github.com/andrew-saydjari/apMADGICS.jl")
+Pkg.add(url="https://github.com/andrew-saydjari/arMADGICS.jl")
 ```
 
 ## Inputs
@@ -54,7 +54,7 @@ There is still a (much smaller dimensional) space that MADGICS needs to sample o
 
 ## Ingest Module Flag Bits
 
-During ingestion, some of the exposure files may have issues that cause the spectrum to come through apMADGICS.jl as a vector of only NaNs. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
+During ingestion, some of the exposure files may have issues that cause the spectrum to come through arMADGICS.jl as a vector of only NaNs. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
 
 | Value         | Bit         | Meaning     |
 | ----------- | ----------- | ----------- |
@@ -63,8 +63,8 @@ During ingestion, some of the exposure files may have issues that cause the spec
 | 4     | 2     | DRP masked all pixels (for at least one of the exposures) |
 | 8     | 3     | Error calibration NaNed observation or upstream std_dev NaNs (for at least one of the exposures) |
 | 16    | 4     | All NaNs or zeros after interpolation |
-| 32    | 5     | Thrpt in apFlux file below thrpt_cut, NaNed by apMADGICS.jl |
-| 64    | 6     | NaNs in apFlux file, but apMADGICS.jl does not depend on these values |
+| 32    | 5     | Thrpt in apFlux file below thrpt_cut, NaNed by arMADGICS.jl |
+| 64    | 6     | NaNs in apFlux file, but arMADGICS.jl does not depend on these values |
 
 
 

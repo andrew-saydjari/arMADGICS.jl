@@ -70,23 +70,23 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
     prior_dict["runlists"] = prior_dir*"2024_03_15/outlists/star/dr17_dr17_star_input_lst_msked_" # repackaged for cross platform/version from 2024_03_05
 
     # Sky Priors
-    prior_dict["skycont"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/sky_priors/APOGEE_skycont_svd_30_f"
-    prior_dict["skyLines_bright"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_bright_GSPICE_svd_120_f"
-    prior_dict["skyLines_faint"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_faint_GSPICE_svd_120_f"
+    prior_dict["skycont"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skycont_svd_30_f"
+    prior_dict["skyLines_bright"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_bright_GSPICE_svd_120_f"
+    prior_dict["skyLines_faint"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_faint_GSPICE_svd_120_f"
 
     # Star Priors
-    prior_dict["starCont"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/star_priors/APOGEE_starcont_svd_60_f"
-    prior_dict["starLines_refLSF"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_th_22500.h5"
-    prior_dict["starLines_LSF"] = prior_dir*"2024_03_16/apMADGICS.jl/src/prior_build/starLine_priors_norm94_dd/APOGEE_starCor_svd_50_subpix_f" # DD Version
-    # prior_dict["starLines_LSF"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_f" # TH Version
+    prior_dict["starCont"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/star_priors/APOGEE_starcont_svd_60_f"
+    prior_dict["starLines_refLSF"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_th_22500.h5"
+    prior_dict["starLines_LSF"] = prior_dir*"2024_03_16/arMADGICS.jl/src/prior_build/starLine_priors_norm94_dd/APOGEE_starCor_svd_50_subpix_f" # DD Version
+    # prior_dict["starLines_LSF"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_f" # TH Version
 
     # DIB Priors
     dib_waves = [15273, 15672]
     for dib in dib_waves
-        # prior_dict["DIB_noLSF_$(dib)"] = prior_dir*"2024_03_05/apMADGICS.jl/src/prior_build/dib_priors/precomp_dust_1_$(dib)_analyticDeriv_stiff.h5"
-        prior_dict["DIB_noLSF_soft_$(dib)"] = prior_dir*"2024_03_05/apMADGICS.jl/src/prior_build/dib_priors/precomp_dust_3_$(dib)_analyticDeriv_soft.h5"
-        prior_dict["DIB_LSF_$(dib)"] = prior_dir*"2024_03_05/apMADGICS.jl/src/prior_build/dib_priors/precomp_dust_1_$(dib)_analyticDerivLSF_stiff_"
-        prior_dict["DIB_LSF_soft_$(dib)"] = prior_dir*"2024_03_05/apMADGICS.jl/src/prior_build/dib_priors/precomp_dust_3_$(dib)_analyticDerivLSF_soft_"
+        # prior_dict["DIB_noLSF_$(dib)"] = prior_dir*"2024_03_05/arMADGICS.jl/src/prior_build/dib_priors/precomp_dust_1_$(dib)_analyticDeriv_stiff.h5"
+        prior_dict["DIB_noLSF_soft_$(dib)"] = prior_dir*"2024_03_05/arMADGICS.jl/src/prior_build/dib_priors/precomp_dust_3_$(dib)_analyticDeriv_soft.h5"
+        prior_dict["DIB_LSF_$(dib)"] = prior_dir*"2024_03_05/arMADGICS.jl/src/prior_build/dib_priors/precomp_dust_1_$(dib)_analyticDerivLSF_stiff_"
+        prior_dict["DIB_LSF_soft_$(dib)"] = prior_dir*"2024_03_05/arMADGICS.jl/src/prior_build/dib_priors/precomp_dust_3_$(dib)_analyticDerivLSF_soft_"
     end
 
     # maps dib scans to dib_waves
@@ -455,7 +455,7 @@ end
         adjfibindx = (teleind-1)*300 + fiberindx
 
         ### Save and cache restart handling
-        savename = join([out_dir,lpad(adjfibindx,3,"0"),"apMADGICS_fiber_"*lpad(adjfibindx,3,"0")*"_batch_"*lpad(startind,7,"0")*".h5"],"/")
+        savename = join([out_dir,lpad(adjfibindx,3,"0"),"arMADGICS_fiber_"*lpad(adjfibindx,3,"0")*"_batch_"*lpad(startind,7,"0")*".h5"],"/")
         dirName = splitdir(savename)[1]
         if !ispath(dirName)
             mkpath(dirName)
@@ -631,7 +631,7 @@ end
             extractlst = vcat(RVextract...,DIBextract...)
                 
             hdr_dict = Dict(   
-                    "pipeline"=>"apMADGICS.jl",
+                    "pipeline"=>"arMADGICS.jl",
                     "git_branch"=>git_branch,   
                     "git_commit"=>git_commit,
             )           
@@ -673,7 +673,7 @@ flush(stdout)
 
 pout = @showprogress pmap(multi_spectra_batch,ittot)
 # pout = @showprogress pmap(multi_spectra_batch,ittot,on_error=ex->2)
-writedlm(out_dir*"pout_apMADGICS.txt",pout)
+writedlm(out_dir*"pout_arMADGICS.txt",pout)
 rmprocs(workers())
 
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t0)); println("Total script runtime: $dt"); t_then = t_now; flush(stdout)

@@ -1,4 +1,4 @@
-## This generates a series of injection tests using synthetic stars an DIBs in real sky fiber/continuum observations in order to test and calibrate the apMADGICS pipeline.
+## This generates a series of injection tests using synthetic stars an DIBs in real sky fiber/continuum observations in order to test and calibrate the arMADGICS pipeline.
 # Author - Andrew Saydjari, CfA
 
 import Pkg; using Dates; t0 = now(); t_then = t0;
@@ -73,16 +73,16 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
     prior_dict["inject_cache_dir"] = prior_dir*"2024_03_11/inject_local_cache_15672only_295_corr/"
     prior_dict["local_cache"] = prior_dir*"2024_03_11/local_cache_inject_15672/"
 
-    prior_dict["past_run"] = prior_dir*"2024_03_08/outdir_wu_295_LocMean/apMADGICS_out.h5" # used for StarScale distribution only
-    prior_dict["korg_run_path"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/starLine_disk_KnackedKorg/"
+    prior_dict["past_run"] = prior_dir*"2024_03_08/outdir_wu_295_LocMean/arMADGICS_out.h5" # used for StarScale distribution only
+    prior_dict["korg_run_path"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_disk_KnackedKorg/"
 
     prior_dict["sqrt_corr_kernels"] = prior_dir*"2024_03_11/sqrt_corr_kernel_"
 
     # Sky Sources
     prior_dict["sky_runlist"] = prior_dir*"2024_02_21/outlists/sky/dr17_dr17_sky_input_lst_plate_msked_"
-    prior_dict["starContSamples"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/tell_prior_disk/starCont_"
-    prior_dict["skyContSamples"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/sky_prior_disk/skycont_"
-    prior_dict["chebmsk_exp"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/sky_prior_disk/chebmsk_exp_"
+    prior_dict["starContSamples"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/tell_prior_disk/starCont_"
+    prior_dict["skyContSamples"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/sky_prior_disk/skycont_"
+    prior_dict["chebmsk_exp"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/sky_prior_disk/chebmsk_exp_"
 
     prior_dict["LSF_mat_APO"] = prior_dir0*"2023_04_01/mat_lsf_out/sp_combolsfmat_norm_" # last made 2023_04_01 by AKS
     prior_dict["LSF_mat_LCO"] = prior_dir0*"2023_04_07/mat_lsf_out/sp_combolsfmat_norm_" # last made 2023_04_07 by AKS
@@ -364,7 +364,7 @@ println("All Star Models Used Converged: ", sum(converged_flag[korgindx,..]) == 
 @everywhere take_draw_partial(ovtup) = take_draw(ovtup,skycont_only=skycont_only,no_sky=no_sky,dibs_on=dibs_on,correlated_noise=correlated_noise,dib_center_lambda_lst=dib_center_lambda_lst,inject_cache_dir=prior_dict["inject_cache_dir"],cache_dir=prior_dict["local_cache"])
 pout = @showprogress pmap(take_draw_partial,itarg);
 
-## Write out runlist needed to run the apMADGICS.jl on it
+## Write out runlist needed to run the arMADGICS.jl on it
 input_lst = []
 starcache_lst = []
 for (subindx, subout) in enumerate(pout)

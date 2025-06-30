@@ -7,7 +7,7 @@ function getAndWrite_fluxing(release_dir,redux_ver,tele,field,plate,mjd; cache_d
     flux_paths, domeflat_expid, cartVisit = build_apFluxPaths(release_dir,redux_ver,tele,field,plate,mjd)
     fluxingcache = cache_fluxname(tele,field,plate,mjd; cache_dir=cache_dir)
 
-    hdr = FITSHeader(["pipeline","git_branch","git_commit","domeflat_expid","CARTID"],["apMADGICS.jl",git_branch,git_commit,string(domeflat_expid),string(cartVisit)],["","","","",""])
+    hdr = FITSHeader(["pipeline","git_branch","git_commit","domeflat_expid","CARTID"],["arMADGICS.jl",git_branch,git_commit,string(domeflat_expid),string(cartVisit)],["","","","",""])
 
     #should implement this everywhere to avoid race conditions
     thrpt_mat = zeros(3,300)
@@ -234,9 +234,9 @@ function stack_out(release_dir,redux_ver,tele,field,plate,mjd,fiberindx; telluri
     if all(isnanorzero.(outvec))
         ingest_bit += 2^4 # all NaNs or zeros after interp
     elseif (thrptDict["a"]<0) || (thrptDict["b"]<0) || (thrptDict["c"]<0)
-        ingest_bit += 2^5 # bad thrpt below thrpt_cut, NaNed by apMADGICS.jl
+        ingest_bit += 2^5 # bad thrpt below thrpt_cut, NaNed by arMADGICS.jl
     elseif isnan(thrptDict["a"]) || isnan(thrptDict["b"]) || isnan(thrptDict["c"])
-        ingest_bit += 2^6 # NaNs in apFlux file, however apMADGICS.jl does not depend on these values
+        ingest_bit += 2^6 # NaNs in apFlux file, however arMADGICS.jl does not depend on these values
     end
 
     if (thrptDict["a"]<0) || (thrptDict["b"]<0) || (thrptDict["c"]<0)
