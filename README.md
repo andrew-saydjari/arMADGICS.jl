@@ -6,6 +6,8 @@
 
 Pipeline for APOGEE spectra using Marginalized Analytic Dataspace Gaussian Inference for Component Separation (MADGICS).
 
+Newer version of [apMADGICS.jl](https://github.com/andrew-saydjari/apMADGICS.jl) in order to support improved reductions from [ApogeeReduction.jl](https://github.com/andrew-saydjari/ApogeeReduction.jl).
+
 ## Installation
 
 This is a pipeline. Not a package. It is not really meant to be installed. The pipeline.jl script is meant to be run. This repo documents the development and versions of the pipeline for transparency and reproducibility.
