@@ -3,101 +3,72 @@
 
 using AstroTime
 
-function getAndWrite_fluxing(release_dir,redux_ver,tele,field,plate,mjd; cache_dir="../local_cache",nattempts=5,thrpt_cut=0.35)
-    flux_paths, domeflat_expid, cartVisit = build_apFluxPaths(release_dir,redux_ver,tele,field,plate,mjd)
-    fluxingcache = cache_fluxname(tele,field,plate,mjd; cache_dir=cache_dir)
-
-    hdr = FITSHeader(["pipeline","git_branch","git_commit","domeflat_expid","CARTID"],["arMADGICS.jl",git_branch,git_commit,string(domeflat_expid),string(cartVisit)],["","","","",""])
-
-    #should implement this everywhere to avoid race conditions
-    thrpt_mat = zeros(3,300)
-    tmpfname = tempname()*"fits"
-    h = FITS(tmpfname,"w")
-    write(h,[0],header=hdr,name="header_only")
-    for (chipind,chip) in enumerate(["a","b","c"])
-        flux_path = flux_paths[chipind]
-        f = FITS(flux_path)
-        thrpt_mat[chipind,:] .= read(f[3])
-        close(f)
-    end
-
-    msk_bad_thrpt = (thrpt_mat[1,:] .< thrpt_cut) .| (thrpt_mat[2,:] .< thrpt_cut) .| (thrpt_mat[3,:] .< thrpt_cut)
-    thrpt_mat[:,msk_bad_thrpt] .= -1
-    
-    for (chipind,chip) in enumerate(["a","b","c"])
-        write(h,thrpt_mat[chipind,:],name=chip)
-    end
-    close(h)
-
-    try
-        for i=1:nattempts
-            if !isfile(fluxingcache)
-                mv(tmpfname,fluxingcache,force=true)
-                break
-            else
-                break
-            end
-        end
-    catch
-        mv(tmpfname,fluxingcache,force=true)
-    end
-end
-
-function getSky4visit(release_dir,redux_ver,tele,field,plate,mjd,fiberindx,skymsk,V_skyline_bright,V_skyline_faint,V_skycont;sky_obs_thresh=5,skyZcut=10,caching=false,cache_dir="../local_cache")
-    ### Find all of the Sky Fibers
-    vname = build_visitpath(release_dir,redux_ver,tele,field,plate,mjd,fiberindx)
-    # do we want to move away from relying on the apPlateFile? 
-    # idk, seems fairly robust
-    plateFile = build_platepath(release_dir,redux_ver,tele,field,plate,mjd,"a")
-    frame_lst = getFramesFromPlate(plateFile)
-
-    fname = visit2cframe(vname,tele,frame_lst[1],"a")
-    f = FITS(fname)
-    objtype = read(f[12],"OBJTYPE")
-    fiberids = read(f[12],"FIBERID");
+function getSkyRough(reduxBase, tele, mjd, expnum; skyZcut=10, sky_obs_thresh=5)
+    # hacks 
+    almanacFile = get_almanac_file(reduxBase, mjd)
+    f = h5open(almanacFile)
+    fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
-    skyinds = findall((objtype.=="SKY") .& (fiberids.!=(301-fiberindx)));
 
-    ### Decompose all of the Sky Fibers
-    outcont = zeros(length(wavetarg),length(skyinds));
-    outLines = zeros(length(wavetarg),length(skyinds));
-    for (findx,fiberind) in enumerate(skyinds)
-        skycacheSpec = cache_skynameSpec(tele,field,plate,mjd,fiberind,cache_dir=cache_dir)
-        if (isfile(skycacheSpec) & caching)
-            fvec, fvarvec, cntvec, chipmidtimes, metaexport = deserialize(skycacheSpec)
-            starscale,framecnts,a_relFlux,b_relFlux,c_relFlux,cartVisit,ingest_bit = metaexport
-        else
-            fvec, fvarvec, cntvec, chipmidtimes, metaexport = stack_out(release_dir,redux_ver,tele,field,plate,mjd,fiberind,cache_dir=cache_dir)
-            starscale,framecnts,a_relFlux,b_relFlux,c_relFlux,cartVisit,ingest_bit = metaexport
-            if caching
-                dirName = splitdir(skycacheSpec)[1]
-                if !ispath(dirName)
-                    mkpath(dirName)
-                end
-                serialize(skycacheSpec,[fvec, fvarvec, cntvec, chipmidtimes, metaexport])
-            end
-        end
+    fibtypelist = map(x->fibtargDict[x],1:300)
+    skyfibIDs = findall(fibtypelist.=="sky");
+    skyfibIndxs = fiberID2fiberIndx.(skyfibIDs);
 
-        simplemsk = (cntvec.==maximum(cntvec));
-        contvec = sky_decomp(fvec, fvarvec, simplemsk .& skymsk, V_skyline_bright, V_skyline_faint, V_skycont)
-        # do we want to save the other components to disk? I am not sure we do.
-        # using sky - skycont as the skyline prior will parition a bit more noise into the skylines, but I worry about marginalizing over moon position
-        outcont[:,findx] .= contvec
-        outLines[simplemsk,findx] .= (fvec.-contvec)[simplemsk]
-    end
+    #get ar1Dname
+    ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
 
-    skyScale = dropdims(nanzeromedian(outcont,1),dims=1);
+    # could speed up by only reading the columns we need
+    f = jldopen(ar1Dfname) 
+    skyspec = f["flux_1d"][:,skyfibIndxs]
+    skyivar = f["ivar_1d"][:,skyfibIndxs];
+    skymsk = f["mask_1d"][:,skyfibIndxs];
+    close(f)
+
+    skyScale = dropdims(nanzeromedian(skyspec,1),dims=1);
     skyMed = nanzeromedian(skyScale)
     skyIQR = nanzeroiqr(skyScale)
     skyZ = (skyScale.-skyMed)./skyIQR;
-    msk = (abs.(skyZ).<skyZcut)
+    mskSky = (abs.(skyZ).<skyZcut)
 
-    msk_local_skyLines = dropdims(sum(.!isnanorzero.(outLines[:,msk]),dims=2),dims=2).>sky_obs_thresh
-    meanLocSky = dropdims(nanzeromean(outcont[:,msk],2),dims=2);
-    meanLocSkyLines = dropdims(nanzeromean(outLines[:,msk],2),dims=2);
-    VLocSky = (outcont[:,msk].-meanLocSky)./sqrt(count(msk));
-    VLocSkyLines = (outLines[:,msk].-meanLocSkyLines)./sqrt(count(msk));
-    return meanLocSky, VLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
+    msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:,mskSky]),dims=2),dims=2).>sky_obs_thresh
+    meanLocSkyLines = dropdims(nanzeromean(skyspec[:,mskSky],2),dims=2);
+    VLocSkyLines = (skyspec[:,mskSky].-meanLocSkyLines)./sqrt(count(mskSky));
+    meanLocSky = zero(meanLocSkyLines) # hack and ignores VLocSky
+    return meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
+end
+
+function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
+    fiberindx = adjfiberindx2fiberindx(adjfiberindx)
+    ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
+    f = h5open(ar1Dfname)
+    fspec = f["flux_1d"][:, fiberindx]
+    fivar = f["ivar_1d"][:, fiberindx]
+    fmsk = f["mask_1d"][:, fiberindx]
+    close(f)
+    metaexport = []
+    return fspec, fivar, fmsk, metaexport
+end
+
+function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
+    teleind = (tele[1:3] == "lco") ? 2 : 1
+    f = h5open(almanacFile)
+    df_exp = read_almanac_exp_df(f, tele, mjd)
+    msk_obj = (df_exp.exptype .== "OBJECT")
+    row_exp = map(x->last(x,4),df_exp[msk_obj,:].exposure_str)
+    run_lsts = []
+    for expnum in row_exp
+        expnumInt = parse(Int, expnum)
+        fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+        fibtypelist = map(x->fibtargDict[x],1:300)
+        # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
+        targfibIDs = findall((fibtypelist.=="sci") .| (fibtypelist.=="tel"));
+        targfibIndxs = fiberID2fiberIndx.(targfibIDs) .+ (teleind-1)*300;
+        iterexp = Iterators.zip(Iterators.repeated(tele),Iterators.repeated(mjd),Iterators.repeated(expnumInt),targfibIndxs)
+        push!(run_lsts, collect(iterexp))
+    end
+    run_lst = vcat(run_lsts...)
+    close(f)
+    return run_lst
 end
 
 function sky_decomp(outvec,outvar,simplemsk,V_skyline_bright,V_skyline_faint,V_skycont)   
@@ -255,18 +226,4 @@ function stack_out(release_dir,redux_ver,tele,field,plate,mjd,fiberindx; telluri
         return outvec, outvar, cntvec, chipmidtimes, metaexport, telvec
     end
     return outvec, outvar, cntvec, chipmidtimes, metaexport
-end
-
-function err_factor(x,err_correct_tup)
-    uflux,mflux,sflux = err_correct_tup
-    lx = log10s(x)
-    if lx <= mflux
-        return 1
-    elseif mflux < lx <= uflux
-        return sflux*(lx-mflux)+1
-    elseif isnan(x)
-        return NaN
-    else
-        return 1 # I don't love this, but seems needed for LCO
-    end
 end
