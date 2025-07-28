@@ -1,7 +1,7 @@
 *.jl.*.cov
 *.jl.cov
 *.jl.mem
-/Manifest.toml
+/Manifest*.toml
 /slurm_logs/*
 */slurm_logs/*
 */*/slurm_logs/*
