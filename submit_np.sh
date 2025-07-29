@@ -17,9 +17,9 @@ almanac_name=$1
 reduxBase="/uufs/chpc.utah.edu/common/home/u6039752/scratch1/sandbox51/airflow-ApogeeReduction.jl/daily/outdir"
 almanacFile=${reduxBase}/almanac/${almanac_name}.h5
 
-julia +1.11.6 --project="./" pipeline.jl --redux_base $reduxBase --almanac_file $almanacFile
+julia +1.11.0 --project="./" pipeline.jl --redux_base $reduxBase --almanac_file $almanacFile
 
-julia +1.11.6 --project="./" workup.jl --outdir "../outdir/arMADGICS/raw/"
+julia +1.11.0 --project="./" workup.jl --outdir "../outdir/arMADGICS/raw/"
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
