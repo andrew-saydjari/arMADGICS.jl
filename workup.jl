@@ -66,7 +66,8 @@ keyslst = keyslst[p]
 keysizelst = keysizelst[p]
 keytypelst = keytypelst[p];
 
-addprocs(SlurmManager(), exeflags=["--project=./"])
+proj_path = dirname(Base.active_project()) * "/"
+addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
 
 @everywhere begin
     using HDF5, ProgressMeter
@@ -108,10 +109,10 @@ end
             @views data_out[.., bind:(bind+sublen-1)] .= pout[ind]
             bind += sublen
         end
-        f = h5open(savename_sub, "w")
-        write(f, "hdr", "This is only a header")
-        write(f, keyval, data_out)
-        close(f)
+        g = h5open(savename_sub, "w")
+        write(g, "hdr", "This is only a header")
+        write(g, keyval, data_out)
+        close(g)
         println("Completed writing: $keyval, Number of Observed Samples: $(bind-1), Number of files: $lfile")
         flush(stdout)
         pout = nothing
