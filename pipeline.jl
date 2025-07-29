@@ -43,7 +43,8 @@ function parse_commandline()
 end
 parg = parse_commandline()
 
-addprocs(SlurmManager(), exeflags=["--project=./"])
+proj_path = dirname(Base.active_project()) * "/"
+addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker allocation took $dt");
