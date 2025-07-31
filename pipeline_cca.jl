@@ -61,7 +61,7 @@ flush(stdout);
     using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
     using ThreadPinning, ApogeeReduction, DataFrames
 
-    prior_dir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/"
+    prior_dir = "/mnt/home/asaydjari/ceph/working/"
     src_dir = "./"
     include(src_dir * "src/utils.jl")
     include(src_dir * "src/gridSearch.jl")
@@ -122,8 +122,8 @@ git_branch, git_commit = initalize_git(src_dir);
 
     # Star Priors
     # prior_dict["starCont"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/star_priors/APOGEE_starcont_svd_60_f"
-    prior_dict["chebmsk"] = prior_dir * "2025_06_16/chebmsk_exp.h5"
-    prior_dict["starCont"] = prior_dir * "2025_06_16/APOGEE_starcont_svd_60_rough.h5"
+    prior_dict["chebmsk"] = prior_dir * "2025_07_31/chebmsk_exp.h5"
+    prior_dict["starCont"] = prior_dir * "2025_07_31/APOGEE_starcont_svd_60_rough.h5"
     prior_dict["starLines_refLSF"] = prior_dir * "2024_02_21/apMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_th_22500.h5"
     # prior_dict["starLines_LSF"] = prior_dir*"2024_03_16/arMADGICS.jl/src/prior_build/starLine_priors_norm94_dd/APOGEE_starCor_svd_50_subpix_f" # DD Version
     # prior_dict["starLines_LSF"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_f" # TH Version
