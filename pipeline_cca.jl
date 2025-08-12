@@ -220,7 +220,7 @@ end
 
         # This could/should shift to a per night preprocessing
         # Get Sky Prior
-        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum)
+        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
         skyscale0 = nanzeromedian(meanLocSky)
 
         # Get the Exposure (Visit) Spectrum

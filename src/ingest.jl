@@ -4,9 +4,8 @@
 using AstroTime
 import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx
 
-function getSkyRough(reduxBase, tele, mjd, expnum; skyZcut=10, sky_obs_thresh=5)
+function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5)
     # hacks 
-    almanacFile = get_almanac_file(reduxBase, mjd)
     f = h5open(almanacFile)
     fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
