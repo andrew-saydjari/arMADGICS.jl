@@ -60,34 +60,38 @@ flush(stdout);
     using FITSIO, Serialization, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays, JLD2, FileIO
     using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
     using ThreadPinning, ApogeeReduction, DataFrames
-
-    prior_dir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/"
-    src_dir = "./"
-    include(src_dir * "src/utils.jl")
-    include(src_dir * "src/gridSearch.jl")
-    include(src_dir * "src/componentAndPosteriors.jl")
-    include(src_dir * "src/fileNameHandling.jl")
-    include(src_dir * "src/ingest.jl")
-    include(src_dir * "src/lowRankPrescription.jl")
-    include(src_dir * "src/marginalizeEW.jl")
-    include(src_dir * "src/spectraInterpolation.jl")
-    include(src_dir * "src/chi2Wrappers.jl")
-
     using StatsBase, ProgressMeter
 end
 @passobj 1 workers() parg
+@passobj 1 workers() proj_path
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker loading took $dt");
 t_then = t_now;
 flush(stdout);
-
 println(BLAS.get_config());
 flush(stdout);
+
+@everywhere begin
+    prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
+    src_dir = "$proj_path"
+    include(joinpath(src_dir, "src/utils.jl"))
+    include(joinpath(src_dir, "src/gridSearch.jl"))
+    include(joinpath(src_dir, "src/componentAndPosteriors.jl"))
+    include(joinpath(src_dir, "src/fileNameHandling.jl"))
+    include(joinpath(src_dir, "src/ingest.jl"))
+    include(joinpath(src_dir, "src/lowRankPrescription.jl"))
+    include(joinpath(src_dir, "src/marginalizeEW.jl"))
+    include(joinpath(src_dir, "src/spectraInterpolation.jl"))
+    include(joinpath(src_dir, "src/chi2Wrappers.jl"))
+end
+
 using LibGit2;
-git_branch, git_commit = initalize_git(src_dir);
+println(proj_path)
+git_branch, git_commit, git_clean = initalize_git(proj_path);
 @passobj 1 workers() git_branch;
 @passobj 1 workers() git_commit;
+@passobj 1 workers() git_clean;
 
 # These global allocations for the injest are messy... but we plan on changing the ingest
 # relatively soon... so don't worry for now.
@@ -116,15 +120,15 @@ git_branch, git_commit = initalize_git(src_dir);
     prior_dict = Dict{String,String}()
 
     # Sky Priors
-    prior_dict["skycont"] = prior_dir * "2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skycont_svd_30_f"
-    prior_dict["skyLines_bright"] = prior_dir * "2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_bright_GSPICE_svd_120_f"
-    prior_dict["skyLines_faint"] = prior_dir * "2024_02_21/arMADGICS.jl/src/prior_build/sky_priors/APOGEE_skyline_faint_GSPICE_svd_120_f"
+    prior_dict["skycont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_skycont_svd_30_f"
+    prior_dict["skyLines_bright"] = prior_dir * "2025_07_31/prior_dump/sky_priors/APOGEE_skyline_bright_GSPICE_svd_120_f"
+    prior_dict["skyLines_faint"] = prior_dir * "2025_07_31/prior_dump/sky_priors/APOGEE_skyline_faint_GSPICE_svd_120_f"
 
     # Star Priors
     # prior_dict["starCont"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/star_priors/APOGEE_starcont_svd_60_f"
-    prior_dict["chebmsk"] = prior_dir * "2025_06_16/chebmsk_exp.h5"
-    prior_dict["starCont"] = prior_dir * "2025_06_16/APOGEE_starcont_svd_60_rough.h5"
-    prior_dict["starLines_refLSF"] = prior_dir * "2024_02_21/apMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_th_22500.h5"
+    prior_dict["chebmsk"] = prior_dir * "2025_07_31/prior_dump/chebmsk_exp.h5"
+    prior_dict["starCont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
+    prior_dict["starLines_refLSF"] = prior_dir * "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5"
     # prior_dict["starLines_LSF"] = prior_dir*"2024_03_16/arMADGICS.jl/src/prior_build/starLine_priors_norm94_dd/APOGEE_starCor_svd_50_subpix_f" # DD Version
     # prior_dict["starLines_LSF"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_f" # TH Version
 
@@ -217,7 +221,7 @@ end
 
         # This could/should shift to a per night preprocessing
         # Get Sky Prior
-        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum)
+        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
         skyscale0 = nanzeromedian(meanLocSky)
 
         # Get the Exposure (Visit) Spectrum
@@ -473,6 +477,7 @@ end
         if !ispath(dirName)
             mkpath(dirName)
         end
+        # probably should shift this to a check_file function like in ApogeeReduction.jl
         if !isfile(savename)
             # We are loading the priors EVERY time, so there is no benefit to ordering
             # This is not optimal, but reduces scope confusion
@@ -645,16 +650,17 @@ end
             # extractlst = vcat(RVextract...,DIBextract...)
             extractlst = vcat(RVextract...)
 
+            for elelst in extractlst
+                extractor(out, elelst[1], elelst[2], savename)
+            end
             hdr_dict = Dict(
                 "pipeline" => "arMADGICS.jl",
                 "git_branch" => git_branch,
                 "git_commit" => git_commit,
+                "git_clean" => git_clean,
             )
             h5write(savename, "hdr", "This is only a header")
             h5writeattr(savename, "hdr", hdr_dict)
-            for elelst in extractlst
-                extractor(out, elelst[1], elelst[2], savename)
-            end
         end
         return 0
     end
