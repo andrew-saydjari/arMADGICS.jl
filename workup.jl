@@ -41,6 +41,11 @@ end
 deblendf = sort(glob("*/*batch*.h5", "$foldname"));
 lfile = length(deblendf)
 
+if lfile == 0
+    println("No batches found in $foldname. Exiting...")
+    exit()
+end
+
 batchinfo = readdlm(foldname * "batch_info.txt", ',', comments=true)
 nsamp = size(batchinfo, 1)
 
