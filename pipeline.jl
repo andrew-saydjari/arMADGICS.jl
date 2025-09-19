@@ -44,7 +44,12 @@ end
 parg = parse_commandline()
 
 proj_path = dirname(Base.active_project()) * "/"
-addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
+if "SLURM_NTASKS" in keys(ENV)
+    using SlurmClusterManager
+    addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+else
+    addprocs(32, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker allocation took $dt");

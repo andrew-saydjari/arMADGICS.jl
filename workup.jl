@@ -72,7 +72,12 @@ keysizelst = keysizelst[p]
 keytypelst = keytypelst[p];
 
 proj_path = dirname(Base.active_project()) * "/"
-addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
+if "SLURM_NTASKS" in keys(ENV)
+    using SlurmClusterManager
+    addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+else
+    addprocs(32, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+end
 
 @everywhere begin
     using HDF5, ProgressMeter
@@ -81,7 +86,8 @@ addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
         try
             return h5read(fnameval, keyval)
         catch
-            return nothing
+            println("Error reading $keyval from $fnameval")
+            return h5read(fnameval, keyval)
         end
     end
 end
