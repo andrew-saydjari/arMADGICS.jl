@@ -97,8 +97,7 @@ end
             if cond
                 fill!(data_out, 0)
             else
-                global data_out = zeros(
-                    keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
+                global data_out = zeros(keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
             end
         else
             global data_out = zeros(keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
@@ -126,4 +125,5 @@ end
     end
 end
 
+rm.(deblendf)
 rmprocs(workers())
