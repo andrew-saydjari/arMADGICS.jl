@@ -11,7 +11,7 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     close(f)
 
     fibtypelist = map(x -> fibtargDict[x], 1:300)
-    skyfibIDs = findall(fibtypelist .== "sky")
+    skyfibIDs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
     skyfibIndxs = fiberID2fiberIndx.(skyfibIDs)
 
     #get ar1Dname
