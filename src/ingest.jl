@@ -52,17 +52,16 @@ function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
     teleind = (tele[1:3] == "lco") ? 2 : 1
     f = h5open(almanacFile)
     df_exp = read_almanac_exp_df(f, tele, mjd)
-    msk_obj = (df_exp.exptype .== "OBJECT")
-    row_exp = map(x -> last(x, 4), df_exp[msk_obj, :].exposure_str)
+    msk_obj = (df_exp.image_type .== "object")
+    row_exp = df_exp[msk_obj, :].exposure
     run_lsts = []
     for expnum in row_exp
-        expnumInt = parse(Int, expnum)
         fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
         # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
         targfibIDs = findall((fibtypelist .== "sci") .| (fibtypelist .== "tel"))
         targfibIndxs = fiberID2fiberIndx.(targfibIDs) .+ (teleind - 1) * 300
-        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnumInt), targfibIndxs)
+        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), targfibIndxs)
         iterexp_named = map(((t, m, e, f),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f), iterexp)
         push!(run_lsts, collect(iterexp_named))
     end

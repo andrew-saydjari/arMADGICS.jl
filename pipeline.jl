@@ -16,6 +16,7 @@ t_then = t_now;
 flush(stdout);
 using BLISBLAS
 using Distributed, ArgParse, SlurmClusterManager, Suppressor, DataFrames, DelimitedFiles
+using ApogeeReduction: read_almanac_exp_df, get_fibTargDict
 
 function parse_commandline()
     s = ArgParseSettings()
