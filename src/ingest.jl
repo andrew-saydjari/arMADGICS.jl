@@ -14,7 +14,7 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     skyfibIndxs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
 
     if length(skyfibIndxs) == 0
-        return 0, zeros(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE),2), zeros(Bool, length(logUniWaveAPOGEE))
+        return 0, zeros(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE),2), ones(Bool, length(logUniWaveAPOGEE))
     end
 
     #get ar1Dname
