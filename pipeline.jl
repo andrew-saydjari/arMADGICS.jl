@@ -685,14 +685,17 @@ end
     end
 end
 
+# Collect all (tele, mjd) pairs first
 f = h5open(almanacFile)
-run_lsts = []
+tele_mjd_pairs = []
 for tele in keys(f)
     for mjd in keys(f[tele])
-        run_lst = get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
-        push!(run_lsts, run_lst)
+        push!(tele_mjd_pairs, (tele, mjd))
     end
 end
+close(f)
+@everywhere get_telemjd_runlist_from_almanac_partial(argtup) = get_telemjd_runlist_from_almanac(almanacFile, argtup[1], argtup[2])
+run_lsts = pmap(get_telemjd_runlist_from_almanac_partial, tele_mjd_pairs)
 run_lst = vcat(run_lsts...)
 
 iterlst = []
