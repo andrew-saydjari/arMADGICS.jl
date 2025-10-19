@@ -13,6 +13,10 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     fibtypelist = map(x -> fibtargDict[x], 1:300)
     skyfibIndxs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
 
+    if length(skyfibIndxs) == 0
+        return 0, zeros(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE),2), zeros(Bool, length(logUniWaveAPOGEE))
+    end
+
     #get ar1Dname
     ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
 
@@ -28,12 +32,13 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     skyIQR = nanzeroiqr(skyScale)
     skyZ = (skyScale .- skyMed) ./ skyIQR
     mskSky = (abs.(skyZ) .< skyZcut)
+    nSkyFibers = count(mskSky)
 
     msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
     meanLocSkyLines = dropdims(nanzeromean(skyspec[:, mskSky], 2), dims=2)
     VLocSkyLines = (skyspec[:, mskSky] .- meanLocSkyLines) ./ sqrt(count(mskSky))
     meanLocSky = zero(meanLocSkyLines) # hack and ignores VLocSky
-    return meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
+    return nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
 end
 
 function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)

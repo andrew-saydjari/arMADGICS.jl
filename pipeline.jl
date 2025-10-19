@@ -227,7 +227,8 @@ end
 
         # This could/should shift to a per night preprocessing
         # Get Sky Prior
-        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
+        # ingest bit should start here to encode cases with not enough sky
+        nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
         skyscale0 = nanzeromedian(meanLocSky)
 
         # Get the Exposure (Visit) Spectrum
@@ -236,7 +237,7 @@ end
 
         simplemsk = fmsk .& skymsk .& msk_local_skyLines
 
-        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk)) # 1
+        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers)) # 1
 
         if skyCont_off
             meanLocSky .= 0
@@ -589,6 +590,7 @@ end
                 (x -> x[metai][6], "flux_nans"),
                 (x -> x[metai][7], "fluxerr2_nans"),
                 (x -> convert(Vector{Int}, x[metai][8]), "simplemsk"),
+                (x -> x[metai][9], "nSkyFibers"),
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),
