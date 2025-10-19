@@ -2,7 +2,7 @@
 # minor rewrite on the horizon
 
 using AstroTime
-import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx
+import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx, read_almanac_exp_df
 
 function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5)
     # hacks 
