@@ -58,6 +58,7 @@ function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
     f = h5open(almanacFile)
     df_exp = read_almanac_exp_df(f, tele, mjd)
     msk_obj = (df_exp.image_type .== "object")
+    msk_obj .&= (df_exp.n_read .> 3) .& (df_exp.chip_flags .== 7) .& (df_exp.flagged_bad .== 0)
     row_exp = df_exp[msk_obj, :].exposure
     run_lsts = []
     for expnum in row_exp
