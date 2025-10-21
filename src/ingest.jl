@@ -34,7 +34,8 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     mskSky = (abs.(skyZ) .< skyZcut)
     nSkyFibers = count(mskSky)
 
-    msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
+    # msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
+    msk_local_skyLines = ones(Bool, length(logUniWaveAPOGEE))
     meanLocSkyLines = dropdims(nanzeromean(skyspec[:, mskSky], 2), dims=2)
     VLocSkyLines = (skyspec[:, mskSky] .- meanLocSkyLines) ./ sqrt(count(mskSky))
     meanLocSky = zero(meanLocSkyLines) # hack and ignores VLocSky
