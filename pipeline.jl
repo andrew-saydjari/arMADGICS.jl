@@ -16,7 +16,7 @@ t_then = t_now;
 flush(stdout);
 using BLISBLAS
 using Distributed, ArgParse, SlurmClusterManager, Suppressor, DataFrames, DelimitedFiles
-using ApogeeReduction: read_almanac_exp_df, get_fibTargDict
+using ApogeeReduction: read_almanac_exp_df, get_fibTargDict, check_type_for_jld2
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -67,6 +67,7 @@ flush(stdout);
     using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
     using ThreadPinning, ApogeeReduction, DataFrames
     using StatsBase, ProgressMeter
+    using ApogeeReduction: check_type_for_jld2
 end
 @passobj 1 workers() parg
 @passobj 1 workers() proj_path
@@ -104,6 +105,7 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
 @everywhere begin
     refine_iters = 5
     ddstaronly = false
+    checkpoint_mode = "commit_exists"
     runlist_range = 1:600 # 295, 245, 335, 101
     batchsize = 10 #100
 
@@ -478,7 +480,7 @@ end
 end
 
 @everywhere begin
-    function multi_spectra_batch(indsubset; out_dir=out_dir, ddstaronly=ddstaronly)
+    function multi_spectra_batch(indsubset; out_dir=out_dir, ddstaronly=ddstaronly, checkpoint_mode=checkpoint_mode)
         ### Set up
         out = []
         startind = indsubset[1].linear_index
@@ -491,6 +493,7 @@ end
             mkpath(dirName)
         end
         # probably should shift this to a check_file function like in ApogeeReduction.jl
+        # if check_file(savename, mode = checkpoint_mode)
         if !isfile(savename)
             # We are loading the priors EVERY time, so there is no benefit to ordering
             # This is not optimal, but reduces scope confusion
@@ -667,6 +670,7 @@ end
             for elelst in extractlst
                 extractor(out, elelst[1], elelst[2], savename)
             end
+            
             hdr_dict = Dict(
                 "pipeline" => "arMADGICS.jl",
                 "git_branch" => git_branch,
@@ -675,6 +679,21 @@ end
             )
             h5write(savename, "hdr", "This is only a header")
             h5writeattr(savename, "hdr", hdr_dict)
+            # # could merge into safe_jldsave-like handling from AR.jl
+            # # add the git info to the metadata
+            # metadata = Dict{String, Any}()
+            # metadata["pipeline"] = "arMADGICS.jl"
+            # metadata["git_branch"] = git_branch
+            # metadata["git_commit"] = git_commit
+            # metadata["git_clean"] = git_clean
+
+            # # add metadata group to the file
+            # h5open(filename, "r+") do f
+            #     g = create_group(f, "metadata")
+            #     for (k, v) in metadata
+            #         g[k] = check_type_for_jld2(v)
+            #     end
+            # end
         end
         return 0
     end
