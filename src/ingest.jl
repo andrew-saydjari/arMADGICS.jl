@@ -65,10 +65,12 @@ function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
     for expnum in row_exp
         fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
+        fiber_sdss_id_list = map(x -> fiber_sdss_id_Dict[x], 1:300)
         # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
         targfibIndxs = findall((fibtypelist .== "sci") .| (fibtypelist .== "tel"))
         adjtargfibIndxs = targfibIndxs .+ (teleind - 1) * 300
-        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_Dict[targfibIndxs])
+
+        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_list[targfibIndxs])
         iterexp_named = map(((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s), iterexp)
         push!(run_lsts, collect(iterexp_named))
     end
