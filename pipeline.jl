@@ -723,10 +723,13 @@ close(f)
 run_lsts = pmap(get_telemjd_runlist_from_almanac_partial, tele_mjd_pairs)
 run_lst = vcat(run_lsts...)
 
+# this takes like 5 min to run (speed up)
 iterlst = []
+iterlist_full = []
 Base.length(f::Iterators.Flatten) = sum(length, f.it)
 for adjfiberindx in 1:600
-    subiter = filter(x -> x[end] .== adjfiberindx, run_lst)
+    subiter = filter(x -> x[:adjfiberindx] .== adjfiberindx, run_lst)
+    push!(iterlist_full, subiter)
     indexed_tuples = map(enumerate(subiter)) do (idx, named_tuple)
         merge((linear_index=idx,), named_tuple)
     end
@@ -738,6 +741,28 @@ lenargs = length(ittot)
 nwork = length(workers())
 println("Batches to Do: $lenargs, number of workers: $nwork")
 flush(stdout)
+
+# Write flattened iterlist_full to a jld2 file (clean this up later)
+sdss_id_lst = []
+tele_lst = []
+mjd_lst = []
+expnum_lst = []
+adjfiberindx_lst = []
+for iter in iterlist_full
+    push!(sdss_id_lst, map(x -> x.sdss_id, iter))
+    push!(tele_lst, map(x -> x.tele, iter))
+    push!(mjd_lst, map(x -> x.mjd, iter))
+    push!(expnum_lst, map(x -> x.expnum, iter))
+    push!(adjfiberindx_lst, map(x -> x.adjfiberindx, iter))
+end
+sdss_id_all = vcat(sdss_id_lst...)
+tele_all = vcat(tele_lst...)
+mjd_all = vcat(mjd_lst...)
+expnum_all = vcat(expnum_lst...)
+adjfiberindx_all = vcat(adjfiberindx_lst...);
+
+full_list_info_file = joinpath(out_dir, "full_list_info.h5")
+jldsave(full_list_info_file, sdss_id=sdss_id_all, tele=tele_all, mjd=mjd_all, expnum=expnum_all, adjfiberindx=adjfiberindx_all)
 
 # Write the batch information to a simple text file for easy parsing
 println("Writing batch information to file...")

@@ -7,7 +7,7 @@ import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx, read_almanac_exp_df
 function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5)
     # hacks 
     f = h5open(almanacFile)
-    fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+    fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
 
     fibtypelist = map(x -> fibtargDict[x], 1:300)
@@ -63,13 +63,13 @@ function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
     row_exp = df_exp[msk_obj, :].exposure
     run_lsts = []
     for expnum in row_exp
-        fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+        fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
         # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
         targfibIndxs = findall((fibtypelist .== "sci") .| (fibtypelist .== "tel"))
-        targfibIndxs .+= (teleind - 1) * 300
-        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), targfibIndxs)
-        iterexp_named = map(((t, m, e, f),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f), iterexp)
+        adjtargfibIndxs = targfibIndxs .+ (teleind - 1) * 300
+        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_Dict[targfibIndxs])
+        iterexp_named = map(((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s), iterexp)
         push!(run_lsts, collect(iterexp_named))
     end
     run_lst = vcat(run_lsts...)
