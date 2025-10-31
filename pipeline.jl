@@ -237,11 +237,12 @@ end
 
             # Get the Exposure (Visit) Spectrum
             fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
+            snr = nanzeromedian(fspec ./ sqrt(fivar))
             starscale0 = nanzeromedian(fspec)
 
             simplemsk = fmsk .& skymsk .& msk_local_skyLines
 
-            push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers)) # 1
+            push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr)) # 1
 
             if skyCont_off
                 meanLocSky .= 0
@@ -600,6 +601,7 @@ end
                 (x -> x[metai][7], "fluxerr2_nans"),
                 (x -> convert(Vector{Int}, x[metai][8]), "simplemsk"),
                 (x -> x[metai][9], "nSkyFibers"),
+                (x -> x[metai][10], "snr"),
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),
