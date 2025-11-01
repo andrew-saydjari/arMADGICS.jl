@@ -764,15 +764,16 @@ expnum_all = vcat(expnum_lst...)
 adjfiberindx_all = vcat(adjfiberindx_lst...);
 
 full_list_info_file = joinpath(out_dir, "full_list_info.h5")
+dirName = splitdir(full_list_info_file)[1]
+if !ispath(dirName)
+    mkpath(dirName)
+end
 jldsave(full_list_info_file, sdss_id=sdss_id_all, tele=tele_all, mjd=mjd_all, expnum=expnum_all, adjfiberindx=adjfiberindx_all)
 
 # Write the batch information to a simple text file for easy parsing
 println("Writing batch information to file...")
 batch_info_file = joinpath(out_dir, "batch_info.txt")
-dirName = splitdir(batch_info_file)[1]
-if !ispath(dirName)
-    mkpath(dirName)
-end
+
 open(batch_info_file, "w") do io
     println(io, "# Batch information for arMADGICS pipeline")
     println(io, "# Format: linear_index, tele, mjd, expnum, adjfiberindx ")
