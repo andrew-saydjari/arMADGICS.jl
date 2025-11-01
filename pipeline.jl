@@ -107,7 +107,7 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     ddstaronly = false
     checkpoint_mode = "commit_exists"
     runlist_range = 1:600 # 295, 245, 335, 101
-    batchsize = 10 #100
+    batchsize = 100 #10
 
     # Step Size for Chi2 Surface Error Bars
     RV_err_step = 4
@@ -237,7 +237,7 @@ end
 
             # Get the Exposure (Visit) Spectrum
             fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
-            snr = nanzeromedian(fspec ./ sqrt(fivar))
+            snr = nanzeromedian(fspec ./ sqrt.(fivar))
             starscale0 = nanzeromedian(fspec)
 
             simplemsk = fmsk .& skymsk .& msk_local_skyLines
