@@ -7,6 +7,7 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
+Pkg.update("ApogeeReduction");
 Pkg.instantiate();
 Pkg.precompile();
 t_now = now();
