@@ -129,7 +129,7 @@ end
                 h5open(prior_dict["tfun_samples_APO"], "r")
             end
             Atell = permutedims(read(TfunSamplef["design_matrix"]),[2,1])
-            Tfungoodindxlist = if adjfiberindx > 300
+            Tfungoodindxlist = if adjfibindx > 300
                 deserialize(prior_dict["tfun_sample_lst_LCO"]);
             else
                 deserialize(prior_dict["tfun_sample_lst_APO"]);
