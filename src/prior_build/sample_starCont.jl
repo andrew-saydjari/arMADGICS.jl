@@ -99,10 +99,30 @@ end
 end
 
 @everywhere begin
-    function genModSamp(intup,tellFracSamples,TfunSamplef,Ksp,nvecLSF,Atell,fiberindx)
+    const _TFUN_FILES = Dict{String,HDF5.File}()
+
+    function get_tfun_file(path::String)
+        if !haskey(_TFUN_FILES, path) || !isopen(_TFUN_FILES[path])
+            _TFUN_FILES[path] = h5open(path, "r")
+        end
+        return _TFUN_FILES[path]
+    end
+
+    function close_tfun_files()
+        for f in values(_TFUN_FILES)
+            if isopen(f)
+                close(f)
+            end
+        end
+        empty!(_TFUN_FILES)
+        return nothing
+    end
+
+    function genModSamp(intup,tellFracSamples,tfun_path,Ksp,nvecLSF,Atell,fiberindx)
         Teff,Av,Rv,Tfunindx,Tfracindx = intup
         bbs = blackbody.(Ref(Teff), x_model*1e-8);
         rvec = redden_mult(x_model,Av,Rv);
+        TfunSamplef = get_tfun_file(tfun_path)
         Tfunsample = exp.(Atell*TfunSamplef["theta"][:,fiberindx,Tfunindx])
         return tellFracSamples[:,Tfracindx].*Tfunsample./nanzeromedian(Tfunsample).*((Ksp*(rvec.*bbs))./nvecLSF);
     end
@@ -113,6 +133,7 @@ end
         fiberindx = adjFiberIndx2FiberIndx(adjfibindx)
 
         savename = "tell_prior_disk/starCont_"*lpad(adjfibindx,3,"0")*".jdat"
+        mkpath(dirname(savename))
         if !isfile(savename)
             Ksp = if adjfibindx>300
                 deserialize(prior_dict["LSF_mat_LCO"]*lpad(adjfibindx-300,3,"0")*".jdat");
@@ -123,12 +144,14 @@ end
             nvecLSF = dropdims(sum(Ksp,dims=2),dims=2); # used only in starCont sample gen
 
             # Get tell obs to use from disk
-            TfunSamplef =  if adjfibindx > 300
-                h5open(prior_dict["tfun_samples_LCO"], "r")
+            tfun_path =  if adjfibindx > 300
+                prior_dict["tfun_samples_LCO"]
             else
-                h5open(prior_dict["tfun_samples_APO"], "r")
+                prior_dict["tfun_samples_APO"]
             end
-            Atell = permutedims(read(TfunSamplef["design_matrix"]),[2,1])
+            Atell = h5open(tfun_path, "r") do f
+                permutedims(read(f["design_matrix"]), [2,1])
+            end
             Tfungoodindxlist = if adjfibindx > 300
                 deserialize(prior_dict["tfun_sample_lst_LCO"]);
             else
@@ -154,7 +177,7 @@ end
             Tfracindx_lst = rand(rng,1:size(tellFracSamples,2),nsamp);
             itobj = Iterators.zip(Teff_lst,Av_lst,Rv_lst,Tfunindx_lst,Tfracindx_lst)
 
-            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,TfunSamplef,Ksp,nvecLSF,Atell,fiberindx)
+            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,tfun_path,Ksp,nvecLSF,Atell,fiberindx)
             pout = if loc_parallel
                 @showprogress pmap(genModSamp_bound,itobj); #not very fast because of passing
             else
@@ -165,6 +188,7 @@ end
                 outsamp[:,i].=pout[i]
             end
             serialize(savename,outsamp)
+            close_tfun_files()
         end
     end
 end
