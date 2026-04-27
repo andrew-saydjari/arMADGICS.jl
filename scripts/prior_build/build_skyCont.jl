@@ -76,7 +76,7 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     # Location of the samples
     prior_dict["skycont"] = prior_dir*"2026_04_26/sky_prior_disk/skycont_"
     prior_dict["skymsk"] = prior_dir*"2026_04_26/sky_prior_disk/skymsk_"
-    prior_dict["chebmsk_exp"] = prior_dir*"2026_04_26/sky_prior_disk/chebmsk_exp_"
+    prior_dict["StarContChipGapMsk"] = prior_dir*"2026_04_25/StarContChipGapMsk.h5"
 end
 
 @everywhere begin
@@ -94,11 +94,18 @@ end
             savename = prior_dict["skymsk"]*lpad(adjfibindx,3,"0")*".jdat"
             skymsk = deserialize(savename);
 
-            savename = prior_dict["chebmsk_exp"]*lpad(adjfibindx,3,"0")*".jdat"
-            chebmsk_exp = deserialize(savename);
+            # savename = prior_dict["chebmsk_exp"]*lpad(adjfibindx,3,"0")*".jdat"
+            # chebmsk_exp = deserialize(savename);
+            chipgapmsk = h5open(prior_dict["StarContChipGapMsk"], "r") do f
+                if adjfibindx > 300
+                    read(f["lco"])
+                else
+                    read(f["apo"])
+                end
+            end
 
             specsum = dropdims(sum(skycont,dims=1),dims=1)
-            Vred = skycont[chebmsk_exp,specsum.>0];
+            Vred = skycont[chipgapmsk,specsum.>0];
             # weights = ones(size(Vred,2));
             # Vred .*= reshape(weights,1,:);
             nsamp = size(Vred,2)
@@ -109,7 +116,7 @@ end
 
             SF = svd(Csky);
             EVEC = zeros(length(wavetarg),size(SF.U,2))
-            EVEC[chebmsk_exp,:].=SF.U;
+            EVEC[chipgapmsk,:].=SF.U;
 
             dirName = splitdir(fname)[1]
             if !ispath(dirName)
@@ -117,7 +124,6 @@ end
             end
             h5write(fname,"Vmat",EVEC[:,1:nsub]*Diagonal(sqrt.(SF.S[1:nsub])))
             h5write(fname,"λv",SF.S[1:nsub])
-            h5write(fname,"chebmsk_exp",chebmsk_exp)
         end
     end
 end

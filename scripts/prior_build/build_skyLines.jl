@@ -89,7 +89,7 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     prior_dict["skyline"] = prior_dir*"2026_04_26/sky_prior_disk/skyline_"
     prior_dict["skymsk"] = prior_dir*"2026_04_26/sky_prior_disk/skymsk_"
     prior_dict["skyvar"] = prior_dir*"2026_04_26/sky_prior_disk/skyvar_"
-    prior_dict["chebmsk_exp"] = sprior_dir*"2026_04_26/sky_prior_disk/chebmsk_exp_"
+    prior_dict["StarContChipGapMsk"] = prior_dir*"2026_04_25/StarContChipGapMsk.h5"
 end
 
 @everywhere begin
@@ -113,13 +113,20 @@ end
             savename = prior_dict["skyvar"]*lpad(adjfibindx,3,"0")*".jdat"
             skyvar = deserialize(savename);
 
-            savename = prior_dict["chebmsk_exp"]*lpad(adjfibindx,3,"0")*".jdat"
-            chebmsk_exp = deserialize(savename);
+            # savename = prior_dict["chebmsk_exp"]*lpad(adjfibindx,3,"0")*".jdat"
+            # chebmsk_exp = deserialize(savename);
+            chipgapmsk = h5open(prior_dict["StarContChipGapMsk"], "r") do f
+                if adjfibindx > 300
+                    read(f["lco"])
+                else
+                    read(f["apo"])
+                end
+            end
 
             # Sep Bright/Faint
             specsum = dropdims(sum(skyline,dims=1),dims=1)
             obscnt = dropdims(sum(skymsk,dims=2),dims=2);
-            submsk = (obscnt.>=10) .& chebmsk_exp;
+            submsk = (obscnt.>=10) .& chipgapmsk;
             Vred = skyline[submsk,specsum.>0];
             skymsked = skymsk[submsk,specsum.>0]
             Vred .*= skymsked;
@@ -143,7 +150,7 @@ end
             if !(isfile(fnameFaint) & isfile(fnameFaintGSPICE))
                 specsum = dropdims(sum(skyline,dims=1),dims=1)
                 obscnt = dropdims(sum(skymsk,dims=2),dims=2);
-                submsk = (obscnt.>=10) .& chebmsk_exp .& submsk_faint;
+                submsk = (obscnt.>=10) .& chipgapmsk .& submsk_faint;
                 Vred = skyline[submsk,specsum.>0];
                 skymsked = skymsk[submsk,specsum.>0];
                 Vred .*= skymsked
