@@ -37,6 +37,7 @@ println("Running Main on ", gethostname()); flush(stdout);
     using SortFilters, BasisFunctions, Random, DustExtinction
 end
 
+@passobj 1 workers() proj_path
 @everywhere begin
     prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
     src_dir = "$proj_path"
@@ -53,7 +54,6 @@ end
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker loading took $dt"); flush(stdout);
-@passobj 1 workers() proj_path
 println(BLAS.get_config()); flush(stdout);
 
 using LibGit2;
@@ -85,7 +85,7 @@ end
     function build_starCont(adjfibindx)
         savename = "star_priors/APOGEE_starcont_svd_"*string(nsub)*"_f"*lpad(adjfibindx,3,"0")*".h5"
         mkpath(dirname(savename))
-        if !isfile(fname)
+        if !isfile(savename)
             starcontfname = prior_dict["starcont"]*lpad(adjfibindx,3,"0")*".jdat"
             starcont = deserialize(starcontfname)
 

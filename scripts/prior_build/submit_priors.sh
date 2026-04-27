@@ -59,8 +59,8 @@ print_elapsed_time() {
 # julia +1.10.0 build_skyCont.jl # 672 core-h, 1.75h on 6 nodes, 100% cpu usage [OOM possible with Krylov]
 # julia +1.10.0 build_skyLines.jl # 2.7k core-h, 7h on 6 nodes, 100% cpu usage [never use Krylov]
 # julia +1.10.0 sample_Tfun.jl # ~2.3k, 6h on 6 nodes, 2-20% cpu usage (1 restart, no manual intervention, switch to pout exit code model next time)
-julia +$julia_version --project=$base_dir $base_dir/src/prior_build/sample_starCont.jl # 18 core-h, 0.6 h on 1 node (30 cores)
-# julia +1.10.0 build_starCont.jl # 346 core-h, 0.9 h on 6 nodes, 100% cpu usage [OOM possible with Krylov]
+# julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/sample_starCont.jl # 18 core-h, 0.6 h on 1 node (30 cores)
+julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/build_starCont.jl # 346 core-h, 0.9 h on 6 nodes, 100% cpu usage [OOMag possible with Krylov]
 # ----- sequential -----
 # julia +1.10.0 sample_Korg.jl # 966.4 core-h, 2.5h on 6 nodes, 34.8 core-s/spec, 100% cpu usage
 # julia +1.10.0 build_starLines.jl # 40 core-h, 40 min on 1 node, 50% cpu usage

@@ -40,6 +40,7 @@ println("Running Main on ", gethostname()); flush(stdout);
     using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx
 end
 
+@passobj 1 workers() proj_path
 @everywhere begin
     prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
     src_dir = "$proj_path"
@@ -56,7 +57,6 @@ end
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker loading took $dt"); flush(stdout);
-@passobj 1 workers() proj_path
 println(BLAS.get_config()); flush(stdout);
 
 using LibGit2;
