@@ -12,9 +12,7 @@ Pkg.instantiate();
 Pkg.precompile();
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Package activation took $dt");
-t_then = t_now;
-flush(stdout);
+println("Package activation took $dt"); t_then = t_now; flush(stdout);
 using BLISBLAS
 using Distributed, ArgParse, SlurmClusterManager, Suppressor, DataFrames, DelimitedFiles
 using ApogeeReduction: read_almanac_exp_df, get_fibTargDict, check_type_for_jld2
@@ -26,34 +24,25 @@ if "SLURM_NTASKS" in keys(ENV)
 else
     addprocs(30, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
 end
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker allocation took $dt");
-t_then = t_now;
-flush(stdout);
-println("Running Main on ", gethostname());
-flush(stdout);
+t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker allocation took $dt"); t_then = t_now; flush(stdout);
+println("Running Main on ", gethostname()); flush(stdout);
 
 @everywhere begin
     using BLISBLAS
     using LinearAlgebra
     BLAS.set_num_threads(1)
     using FITSIO, Serialization, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays, JLD2, FileIO
-    using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
-    using ThreadPinning, ApogeeReduction, DataFrames
+    using Interpolations, SparseArrays, AstroTime, Suppressor
+    using ApogeeReduction, DataFrames, ParallelDataTransfer
     using StatsBase, ProgressMeter
     using SortFilters, BasisFunctions, Random, DustExtinction, DelimitedFiles
     using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx
 end
-@passobj 1 workers() parg
+t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker loading took $dt"); flush(stdout);
 @passobj 1 workers() proj_path
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker loading took $dt");
-t_then = t_now;
-flush(stdout);
-println(BLAS.get_config());
-flush(stdout);
+println(BLAS.get_config()); flush(stdout);
 
 @everywhere begin
     prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
@@ -139,7 +128,7 @@ end
             else
                 h5open(prior_dict["tfun_samples_APO"], "r")
             end
-            Atell = permutedims(read(f["design_matrix"]),[2,1])
+            Atell = permutedims(read(TfunSamplef["design_matrix"]),[2,1])
             Tfungoodindxlist = if adjfiberindx > 300
                 deserialize(prior_dict["tfun_sample_lst_LCO"]);
             else
