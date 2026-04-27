@@ -1,26 +1,63 @@
-## This is script grabs a bunch of HOT STD star spectra and decomposes them into continuum and skyline components, to serve fit samples of the transfer function required for building the starContinuum prior
-# Author - Andrew Saydjari, CfA
+## This is script grabs a bunch of transfer functions and telluric components fit to domeflats for building the starContinuum prior. (For apMADGICS we used HOT STD stars instead)
+# Author - Andrew Saydjari
 
-import Pkg; using Dates; t0 = now(); t_then = t0;
-using InteractiveUtils; versioninfo()
-Pkg.activate("../../"); Pkg.instantiate(); Pkg.precompile()
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
+import Pkg;
+using Dates;
+t0 = now();
+t_then = t0;
+using InteractiveUtils;
+versioninfo();
+Pkg.update("ApogeeReduction");
+Pkg.instantiate();
+Pkg.precompile();
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Package activation took $dt");
+t_then = t_now;
+flush(stdout);
 using BLISBLAS
-using Distributed, SlurmClusterManager, Suppressor, DataFrames
-addprocs(SlurmManager(),exeflags=["--project=../../"])
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
+using Distributed, ArgParse, SlurmClusterManager, Suppressor, DataFrames, DelimitedFiles
+using ApogeeReduction: read_almanac_exp_df, get_fibTargDict, check_type_for_jld2
+
+proj_path = dirname(Base.active_project()) * "/"
+if "SLURM_NTASKS" in keys(ENV)
+    using SlurmClusterManager
+    addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+else
+    addprocs(30, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+end
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker allocation took $dt");
+t_then = t_now;
+flush(stdout);
+println("Running Main on ", gethostname());
+flush(stdout);
 
 @everywhere begin
     using BLISBLAS
     using LinearAlgebra
     BLAS.set_num_threads(1)
-    using FITSIO, Serialization, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays
+    using FITSIO, Serialization, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays, JLD2, FileIO
     using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
-    using ThreadPinning
+    using ThreadPinning, ApogeeReduction, DataFrames
+    using StatsBase, ProgressMeter
+    using SortFilters, BasisFunctions, Random, DustExtinction, DelimitedFiles
+    using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx
+end
+@passobj 1 workers() parg
+@passobj 1 workers() proj_path
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker loading took $dt");
+t_then = t_now;
+flush(stdout);
+println(BLAS.get_config());
+flush(stdout);
 
-    prior_dir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/"
-    prior_dir0 = "/uufs/chpc.utah.edu/common/home/u6039752/scratch/working/"
-    src_dir = "../../"
+@everywhere begin
+    prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
+    src_dir = "$proj_path"
     include(src_dir*"src/utils.jl")
     include(src_dir*"src/gridSearch.jl")
     include(src_dir*"src/componentAndPosteriors.jl")
@@ -31,18 +68,14 @@ t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); prin
     include(src_dir*"src/spectraInterpolation.jl")
     include(src_dir*"src/chi2Wrappers.jl")
     include(src_dir*"src/prior_build/prior_utils.jl")
-    
-    using StatsBase, ProgressMeter
-    using SortFilters, BasisFunctions, Random, DustExtinction, DelimitedFiles
 end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker loading took $dt"); t_then = t_now; flush(stdout)
 
-# Task-Affinity CPU Locking in multinode SlurmContext (# not clear if this causes issues in 1.10.2)
-# slurm_cpu_lock()
-# t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("CPU locking took $dt"); t_then = t_now; flush(stdout)
-
-println(BLAS.get_config()); flush(stdout)
-using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 workers() git_branch; @passobj 1 workers() git_commit
+using LibGit2;
+println(proj_path)
+git_branch, git_commit, git_clean = initalize_git(proj_path);
+@passobj 1 workers() git_branch;
+@passobj 1 workers() git_commit;
+@passobj 1 workers() git_clean;
 
 @everywhere begin
     runlist_range = 295 #1:600 #295, 245, 335, 101
@@ -56,39 +89,39 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
     # Prior Dictionary
     prior_dict = Dict{String,String}()
 
-    # Input List (not really a prior, but an input file we search for stars conditioned on)
-    prior_dict["tellSamples2read"] = prior_dir*"2024_02_21/outlists/summary/dr17_dr17_tellSamples2read.txt"
     # Data for Cals (not really a prior, but an input the results depend on in detail)
-    prior_dict["LSF_mat_APO"] = prior_dir0*"2023_04_01/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_01 by AKS
-    prior_dict["LSF_mat_LCO"] = prior_dir0*"2023_04_07/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_07 by AKS
-    prior_dict["fracTellSamples_APO"] = prior_dir0*"2023_04_03/outsamptell_apo.jdat" # last made 2023_04_03 by AKS
-    prior_dict["fracTellSamples_LCO"] = prior_dir0*"2023_04_07/outsamptell_lco.jdat" # last made 2023_04_07 by AKS
+    prior_dict["LSF_mat_APO"] = prior_dir*"2026_04_25/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_01 by AKS
+    prior_dict["LSF_mat_LCO"] = prior_dir*"2026_04_26/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_07 by AKS
+    prior_dict["fracTellSamples_APO"] = prior_dir*"2026_04_25/outsamptell_apo.jdat" # last made 2023_04_03 by AKS
+    prior_dict["fracTellSamples_LCO"] = prior_dir*"2026_04_26/outsamptell_lco.jdat" # last made 2023_04_07 by AKS
 
     # Location of the Tfun samples
-    tell_base = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/"
-    prior_dict["tfun_samples"] = tell_base*"tell_prior_disk/tfun_samples_"
+    tell_base = "/mnt/home/acasey/scratch/20260220-arjl-domeflats/"
+    prior_dict["tfun_samples_APO"] = tell_base*"20260323_apo.h5"
+    prior_dict["tfun_samples_LCO"] = tell_base*"20260323_lco.h5"
+    prior_dict["tfun_sample_lst_APO"] = prior_dir*"2026_04_25/20260323_apo_tfunlist.jdat"
+    prior_dict["tfun_sample_lst_LCO"] = prior_dir*"2026_04_25/20260323_lco_tfunlist.jdat"
 end
 
 @everywhere begin
     wavetarg = 10 .^range((4.179-125*6.0e-6),step=6.0e-6,length=8575+125) #first argument is start, revert fix to enable 1.6 compat
     minw, maxw = extrema(wavetarg);
     x_model = 15000:0.01:17000
-
-    tellsamplesTxt = readdlm(prior_dict["tellSamples2read"],',')
-    tellsample_lst = map(x->x[x.!=""],eachrow(tellsamplesTxt))
 end
 
 @everywhere begin
-    function genModSamp(intup,tellFracSamples,TfunSamples,Ksp,nvecLSF)
+    function genModSamp(intup,tellFracSamples,TfunSamplef,Ksp,nvecLSF,Atell,fiberindx)
         Teff,Av,Rv,Tfunindx,Tfracindx = intup
         bbs = blackbody.(Ref(Teff), x_model*1e-8);
         rvec = redden_mult(x_model,Av,Rv);
-        return tellFracSamples[:,Tfracindx].*TfunSamples[:,Tfunindx].*((Ksp*(rvec.*bbs))./nvecLSF);
+        Tfunsample = exp.(Atell*TfunSamplef["theta"][:,fiberindx,Tfunindx])
+        return tellFracSamples[:,Tfracindx].*Tfunsample./nanzeromedian(Tfunsample).*((Ksp*(rvec.*bbs))./nvecLSF);
     end
 end
 
 @everywhere begin
     function gen_starCont_samples(adjfibindx;loc_parallel=false,seed=203)
+        fiberindx = adjFiberIndx2FiberIndx(adjfibindx)
 
         savename = "tell_prior_disk/starCont_"*lpad(adjfibindx,3,"0")*".jdat"
         if !isfile(savename)
@@ -101,11 +134,19 @@ end
             nvecLSF = dropdims(sum(Ksp,dims=2),dims=2); # used only in starCont sample gen
 
             # Get tell obs to use from disk
-            sampcatlst = []
-            for fib_subindx in tellsample_lst[adjfibindx]
-                push!(sampcatlst,deserialize(prior_dict["tfun_samples"]*lpad(fib_subindx,3,"0")*".jdat"))
+            TfunSamplef =  if adjfibindx > 300
+                h5open(prior_dict["tfun_samples_LCO"], "r")
+            else
+                h5open(prior_dict["tfun_samples_APO"], "r")
             end
-            TfunSamples = hcat(sampcatlst...);
+            Atell = permutedims(read(f["design_matrix"]),[2,1])
+            Tfungoodindxlist = if adjfiberindx > 300
+                deserialize(prior_dict["tfun_sample_lst_LCO"]);
+            else
+                deserialize(prior_dict["tfun_sample_lst_APO"]);
+            end
+            # Get list for which obs are "useable"
+
 
             # Load the fraction telluric model samples (10k random from visits, stacked frames)
             tellFracSamples = if adjfibindx > 300
@@ -120,11 +161,11 @@ end
             Teff_lst = rand(rng,Teff_rng,nsamp)
             Av_lst = rand(rng,Av_rng,nsamp)
             Rv_lst = rand(rng,Rv_rng,nsamp)
-            Tfunindx_lst = rand(rng,1:size(TfunSamples,2),nsamp);
+            Tfunindx_lst = rand(rng,Tfungoodindxlist[fiberindx],nsamp);
             Tfracindx_lst = rand(rng,1:size(tellFracSamples,2),nsamp);
             itobj = Iterators.zip(Teff_lst,Av_lst,Rv_lst,Tfunindx_lst,Tfracindx_lst)
 
-            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,TfunSamples,Ksp,nvecLSF)
+            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,TfunSamplef,Ksp,nvecLSF,Atell,fiberindx)
             pout = if loc_parallel
                 @showprogress pmap(genModSamp_bound,itobj); #not very fast because of passing
             else
@@ -139,5 +180,5 @@ end
     end
 end
 
-# gen_starCont_samples(runlist_range,loc_parallel=true)
-@showprogress pmap(gen_starCont_samples,1:600)
+gen_starCont_samples(runlist_range,loc_parallel=true)
+# @showprogress pmap(gen_starCont_samples,1:600)
