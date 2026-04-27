@@ -39,10 +39,6 @@ println("Running Main on ", gethostname()); flush(stdout);
     using SortFilters, BasisFunctions, Random, DustExtinction, DelimitedFiles
     using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx
 end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker loading took $dt"); flush(stdout);
-@passobj 1 workers() proj_path
-println(BLAS.get_config()); flush(stdout);
 
 @everywhere begin
     prior_dir = "/mnt/ceph/users/sdssv/work/asaydjari/"
@@ -56,8 +52,12 @@ println(BLAS.get_config()); flush(stdout);
     include(src_dir*"src/marginalizeEW.jl")
     include(src_dir*"src/spectraInterpolation.jl")
     include(src_dir*"src/chi2Wrappers.jl")
-    include(src_dir*"src/prior_build/prior_utils.jl")
+    include(src_dir*"scripts/prior_build/prior_utils.jl")
 end
+t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker loading took $dt"); flush(stdout);
+@passobj 1 workers() proj_path
+println(BLAS.get_config()); flush(stdout);
 
 using LibGit2;
 println(proj_path)
@@ -193,5 +193,5 @@ end
     end
 end
 
-gen_starCont_samples(runlist_range,loc_parallel=true)
-# @showprogress pmap(gen_starCont_samples,1:600)
+# gen_starCont_samples(runlist_range,loc_parallel=true)
+@showprogress pmap(gen_starCont_samples,1:600)
