@@ -41,6 +41,11 @@ end
 deblendf = sort(glob("*/*batch*.h5", "$foldname"));
 lfile = length(deblendf)
 
+if lfile == 0
+    println("No batches found in $foldname. Exiting...")
+    exit()
+end
+
 batchinfo = readdlm(foldname * "batch_info.txt", ',', comments=true)
 nsamp = size(batchinfo, 1)
 
@@ -67,7 +72,12 @@ keysizelst = keysizelst[p]
 keytypelst = keytypelst[p];
 
 proj_path = dirname(Base.active_project()) * "/"
-addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
+if "SLURM_NTASKS" in keys(ENV)
+    using SlurmClusterManager
+    addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+else
+    addprocs(32, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+end
 
 @everywhere begin
     using HDF5, ProgressMeter
@@ -76,7 +86,8 @@ addprocs(SlurmManager(), exeflags=["--project=$proj_path"])
         try
             return h5read(fnameval, keyval)
         catch
-            return nothing
+            println("Error reading $keyval from $fnameval")
+            return h5read(fnameval, keyval)
         end
     end
 end
@@ -92,8 +103,7 @@ end
             if cond
                 fill!(data_out, 0)
             else
-                global data_out = zeros(
-                    keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
+                global data_out = zeros(keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
             end
         else
             global data_out = zeros(keytypelst[indkey], keysizelst[indkey][1:(end-1)]..., nsamp)
@@ -121,4 +131,5 @@ end
     end
 end
 
+rm.(deblendf)
 rmprocs(workers())

@@ -2,18 +2,28 @@
 # minor rewrite on the horizon
 
 using AstroTime
-import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx
+import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx, read_almanac_exp_df
 
-function getSkyRough(reduxBase, tele, mjd, expnum; skyZcut=10, sky_obs_thresh=5)
+function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5, fibindxoi=nothing)
     # hacks 
-    almanacFile = get_almanac_file(reduxBase, mjd)
     f = h5open(almanacFile)
-    fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+    fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
 
     fibtypelist = map(x -> fibtargDict[x], 1:300)
-    skyfibIDs = findall(fibtypelist .== "sky")
-    skyfibIndxs = fiberID2fiberIndx.(skyfibIDs)
+    skyfibIndxs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
+
+    if !isnothing(fibindxoi)
+        if (length(skyfibIndxs) == 0)
+            return nothing
+        elseif !(fibindxoi in skyfibIndxs)
+            return nothing
+        end
+    end
+
+    if length(skyfibIndxs) == 0
+        return 0, zeros(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE),2), ones(Bool, length(logUniWaveAPOGEE))
+    end
 
     #get ar1Dname
     ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
@@ -30,12 +40,23 @@ function getSkyRough(reduxBase, tele, mjd, expnum; skyZcut=10, sky_obs_thresh=5)
     skyIQR = nanzeroiqr(skyScale)
     skyZ = (skyScale .- skyMed) ./ skyIQR
     mskSky = (abs.(skyZ) .< skyZcut)
+    nSkyFibers = count(mskSky)
 
-    msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
+    if !isnothing(fibindxoi)
+        if !(fibindxoi in skyfibIndxs[mskSky])
+            return nothing
+        else
+            localIndx = findfirst(skyfibIndxs.==fibindxoi)
+            return skyspec[:,localIndx], skyivar[:,localIndx], skymsk[:,localIndx]
+        end
+    end
+
+    # msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
+    msk_local_skyLines = ones(Bool, length(logUniWaveAPOGEE))
     meanLocSkyLines = dropdims(nanzeromean(skyspec[:, mskSky], 2), dims=2)
     VLocSkyLines = (skyspec[:, mskSky] .- meanLocSkyLines) ./ sqrt(count(mskSky))
     meanLocSky = zero(meanLocSkyLines) # hack and ignores VLocSky
-    return meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
+    return nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
 end
 
 function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
@@ -50,22 +71,33 @@ function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     return fspec, fivar, fmsk, metaexport
 end
 
-function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
+function get_telemjd_runlist_from_almanac(
+        almanacFile, tele, mjd;
+        accepted_fibtypes::Vector{String} = ["sci", "tel"]
+    )
     teleind = (tele[1:3] == "lco") ? 2 : 1
     f = h5open(almanacFile)
     df_exp = read_almanac_exp_df(f, tele, mjd)
-    msk_obj = (df_exp.exptype .== "OBJECT")
-    row_exp = map(x -> last(x, 4), df_exp[msk_obj, :].exposure_str)
+    msk_obj = (df_exp.image_type .== "object")
+    msk_obj .&= (df_exp.n_read .> 3) .& (df_exp.chip_flags .== 7) .& (df_exp.flagged_bad .== 0)
+    row_exp = df_exp[msk_obj, :].exposure
     run_lsts = []
     for expnum in row_exp
-        expnumInt = parse(Int, expnum)
-        fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+        fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
-        # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
-        targfibIDs = findall((fibtypelist .== "sci") .| (fibtypelist .== "tel"))
-        targfibIndxs = fiberID2fiberIndx.(targfibIDs) .+ (teleind - 1) * 300
-        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnumInt), targfibIndxs)
-        iterexp_named = map(((t, m, e, f),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f), iterexp)
+        fiber_sdss_id_list = map(x -> fiber_sdss_id_Dict[x], 1:300)
+        msk_fiberok = map(x -> x[1:3] in accepted_fibtypes, fibtypelist)
+        targfibIndxs = findall(msk_fiberok)
+        adjtargfibIndxs = targfibIndxs .+ (teleind - 1) * 300
+
+        iterexp = Iterators.zip(
+            Iterators.repeated(tele), Iterators.repeated(mjd),
+            Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_list[targfibIndxs]
+        )
+        iterexp_named = map(
+            ((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s),
+            iterexp
+        )
         push!(run_lsts, collect(iterexp_named))
     end
     run_lst = vcat(run_lsts...)
