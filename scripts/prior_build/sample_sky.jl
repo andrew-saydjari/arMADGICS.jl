@@ -225,9 +225,17 @@ end
 # Collect all (tele, mjd) pairs first
 f = h5open(almanacFile)
 tele_mjd_pairs = []
-for tele in keys(f)
-    for mjd in keys(f[tele])
-        push!(tele_mjd_pairs, (tele, mjd))
+if haskey(f, "raw")
+    for tele in keys(f["raw"])
+        for mjd in keys(f["raw"][tele])
+            push!(tele_mjd_pairs, (tele, mjd))
+        end
+    end
+else
+    for tele in keys(f)
+        for mjd in keys(f[tele])
+            push!(tele_mjd_pairs, (tele, mjd))
+        end
     end
 end
 close(f)
