@@ -47,7 +47,6 @@ rev = "main"
 url = "https://github.com/andrew-saydjari/ApogeeReduction.jl.git"
 
 [compat]
-ApogeeReduction = "1"
 ArgParse = "1"
 AstroTime = "0.7"
 BLISBLAS = "0.1"
