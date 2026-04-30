@@ -4,7 +4,7 @@
 using AstroTime
 import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx, read_almanac_exp_df
 
-function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5)
+function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5, fibindxoi=nothing)
     # hacks 
     f = h5open(almanacFile)
     fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
@@ -12,6 +12,14 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
 
     fibtypelist = map(x -> fibtargDict[x], 1:300)
     skyfibIndxs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
+
+    if !isnothing(fibindxoi)
+        if (length(skyfibIndxs) == 0)
+            return nothing
+        elseif !(fibindxoi in skyfibIndxs)
+            return nothing
+        end
+    end
 
     if length(skyfibIndxs) == 0
         return 0, zeros(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE)), NaN*ones(length(logUniWaveAPOGEE),2), ones(Bool, length(logUniWaveAPOGEE))
@@ -34,6 +42,15 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     mskSky = (abs.(skyZ) .< skyZcut)
     nSkyFibers = count(mskSky)
 
+    if !isnothing(fibindxoi)
+        if !(fibindxoi in skyfibIndxs[mskSky])
+            return nothing
+        else
+            localIndx = findfirst(skyfibIndxs.==fibindxoi)
+            return skyspec[:,localIndx], skyivar[:,localIndx], skymsk[:,localIndx]
+        end
+    end
+
     # msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
     msk_local_skyLines = ones(Bool, length(logUniWaveAPOGEE))
     meanLocSkyLines = dropdims(nanzeromean(skyspec[:, mskSky], 2), dims=2)
@@ -54,7 +71,10 @@ function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     return fspec, fivar, fmsk, metaexport
 end
 
-function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
+function get_telemjd_runlist_from_almanac(
+        almanacFile, tele, mjd;
+        accepted_fibtypes::Vector{String} = ["sci", "tel"]
+    )
     teleind = (tele[1:3] == "lco") ? 2 : 1
     f = h5open(almanacFile)
     df_exp = read_almanac_exp_df(f, tele, mjd)
@@ -66,12 +86,18 @@ function get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
         fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
         fiber_sdss_id_list = map(x -> fiber_sdss_id_Dict[x], 1:300)
-        # should we be sky subtracting the sky fibers (seems like yes, but in Bayesian context?)
-        targfibIndxs = findall((fibtypelist .== "sci") .| (fibtypelist .== "tel"))
+        msk_fiberok = map(x -> x[1:3] in accepted_fibtypes, fibtypelist)
+        targfibIndxs = findall(msk_fiberok)
         adjtargfibIndxs = targfibIndxs .+ (teleind - 1) * 300
 
-        iterexp = Iterators.zip(Iterators.repeated(tele), Iterators.repeated(mjd), Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_list[targfibIndxs])
-        iterexp_named = map(((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s), iterexp)
+        iterexp = Iterators.zip(
+            Iterators.repeated(tele), Iterators.repeated(mjd),
+            Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_list[targfibIndxs]
+        )
+        iterexp_named = map(
+            ((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s),
+            iterexp
+        )
         push!(run_lsts, collect(iterexp_named))
     end
     run_lst = vcat(run_lsts...)
