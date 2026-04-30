@@ -46,7 +46,6 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 ApogeeReduction = {rev = "main", url = "https://github.com/andrew-saydjari/ApogeeReduction.jl.git"}
 
 [compat]
-ApogeeReduction = "1"
 ArgParse = "1"
 AstroTime = "0.7"
 BLISBLAS = "0.1"
