@@ -82,6 +82,9 @@ function woodbury_update_inv_tst(Ainv::LowRankMultMatIP,Xd,V)
 end
 
 function woodbury_update_inv_split_tst(Ainv::LowRankMultMatIP,Xd,V2,AinvV1,XdAinvV1,V1TAinvV1;chi2offset=0.0)
+    if all(isnan, Xd)
+        return NaN
+    end
     mul!(Ainv,V2)
     AinvV2 = Ainv.precompList[end]
     XdAinvV2 = reshape(Xd,1,:)*AinvV2
@@ -96,6 +99,9 @@ function woodbury_update_inv_split_tst(Ainv::LowRankMultMatIP,Xd,V2,AinvV1,XdAin
 end
 
 function woodbury_update_inv_tst_res(Ainv::LowRankMultMatIP,Xd,V,Cres::Diagonal)
+    if all(isnan, Xd)
+        return NaN
+    end
     mul!(Ainv,V)
     AinvV = Ainv.precompList[end]
     XdAinvV = reshape(Xd,1,:)*AinvV

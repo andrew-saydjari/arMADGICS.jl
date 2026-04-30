@@ -21,6 +21,8 @@ julia +1.11.0 --project="./" pipeline.jl --redux_base $reduxBase --almanac_file 
 
 julia +1.11.0 --project="./" workup.jl --outdir "../outdir/arMADGICS/raw/"
 
+
+
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
 echo "Job completed in $formatted_time"
