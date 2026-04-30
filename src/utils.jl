@@ -132,8 +132,9 @@ function initalize_git(git_dir)
     git_repo = LibGit2.GitRepo(git_dir)
     git_head = LibGit2.head(git_repo)
     git_branch = LibGit2.shortname(git_head)
-    println("Running on branch: $git_branch, commit: $git_commit"); flush(stdout)
-    return git_branch, git_commit
+    git_clean = !LibGit2.isdirty(git_repo)
+    println("Running on branch: $git_branch, commit: $git_commit, clean: $git_clean"); flush(stdout)
+    return git_branch, git_commit, git_clean
 end
 
 function grow_msk2d(msk; rad=1)
@@ -197,41 +198,4 @@ end
 
 function shiftHelper(subspec_in,shiftval)
     return shifted_map(subspec_in,-shiftval)
-end
-
-function parseCartID(x)
-    if x == "FPS"
-        return 0
-    elseif typeof(x) <: Union{Int32, Int64}
-        return x
-    elseif typeof(x) == String
-        return parse(Int, x)
-    elseif typeof(x) <: Union{Float32, Float64}
-        return Int(x)
-    else
-        error("Unknown cartid type: $(typeof(x))")
-    end
-end
-
-function read_almanac_exp_df(fname, tele, mjd)
-    df = if fname isa HDF5.File
-        DataFrame(read(fname["$(tele)/$(mjd)/exposures"]))
-    else
-        h5open(fname) do f
-            DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
-        end
-    end
-    df.nreadInt = parse.(Int, df.nread)
-    df.cartidInt = parseCartID.(df.cartid)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
-    return df
 end
