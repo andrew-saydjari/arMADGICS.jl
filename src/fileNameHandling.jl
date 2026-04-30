@@ -13,8 +13,8 @@ chipRedux2Raw = Dict(
 )
 
 ## AR.jl
-function get_1Duni_name(reduxBase, tele, mjd, expnum; fnameType = "ar1Dunical")
-    return joinpath(reduxBase, "apred", mjd, join([fnameType, tele, mjd, lpad(expnum,4,"0"), "object.h5"], "_"))
+function get_1Duni_name(reduxBase, tele, mjd, expnum; fnameType = "ar1Dunical", image_type = "object")
+    return joinpath(reduxBase, "apred", mjd, join([fnameType, tele, mjd, lpad(expnum,4,"0"), "$(image_type).h5"], "_"))
 end
 
 function adjfiberindx2fiberindx(adjfiberindx::Int)

@@ -7,6 +7,7 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
+Pkg.update("ApogeeReduction");
 Pkg.instantiate();
 Pkg.precompile();
 t_now = now();
@@ -16,7 +17,7 @@ t_then = t_now;
 flush(stdout);
 using BLISBLAS
 using Distributed, ArgParse, SlurmClusterManager, Suppressor, DataFrames, DelimitedFiles
-using ApogeeReduction: read_almanac_exp_df, get_fibTargDict
+using ApogeeReduction: read_almanac_exp_df, get_fibTargDict, check_type_for_jld2
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -67,6 +68,7 @@ flush(stdout);
     using Interpolations, SparseArrays, ParallelDataTransfer, AstroTime, Suppressor
     using ThreadPinning, ApogeeReduction, DataFrames
     using StatsBase, ProgressMeter
+    using ApogeeReduction: check_type_for_jld2
 end
 @passobj 1 workers() parg
 @passobj 1 workers() proj_path
@@ -104,8 +106,9 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
 @everywhere begin
     refine_iters = 5
     ddstaronly = false
+    checkpoint_mode = "commit_exists"
     runlist_range = 1:600 # 295, 245, 335, 101
-    batchsize = 10 #100
+    batchsize = 100 #10
 
     # Step Size for Chi2 Surface Error Bars
     RV_err_step = 4
@@ -221,257 +224,265 @@ end
         mjd = argtup.mjd
         expnum = argtup.expnum
         adjfiberindx = argtup.adjfiberindx
-        # V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF, V_starlines, msk_starCor, V_dib_lst, V_dib_soft_lst, V_dib_noLSF_soft_lst = prior_vec
-        chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor = prior_vec
-        out = []
+        
+        try
+            # V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF, V_starlines, msk_starCor, V_dib_lst, V_dib_soft_lst, V_dib_noLSF_soft_lst = prior_vec
+            chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor = prior_vec
+            out = []
 
-        # This could/should shift to a per night preprocessing
-        # Get Sky Prior
-        meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
-        skyscale0 = nanzeromedian(meanLocSky)
+            # This could/should shift to a per night preprocessing
+            # Get Sky Prior
+            # ingest bit should start here to encode cases with not enough sky
+            nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
+            skyscale0 = nanzeromedian(meanLocSky)
 
-        # Get the Exposure (Visit) Spectrum
-        fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
-        starscale0 = nanzeromedian(fspec)
+            # Get the Exposure (Visit) Spectrum
+            fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
+            snr = nanzeromedian(fspec ./ sqrt.(fivar))
+            starscale0 = nanzeromedian(fspec)
 
-        simplemsk = fmsk .& skymsk .& msk_local_skyLines
+            simplemsk = fmsk .& skymsk .& msk_local_skyLines
 
-        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk)) # 1
+            push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr)) # 1
 
-        if skyCont_off
-            meanLocSky .= 0
-            VLocSky .= 0
-        end
-        if skyLines_off
-            meanLocSkyLines .= 0
-            VLocSkyLines .= 0
-            V_skyline_bright .= 0
-            V_skyline_faint .= 0
-        end
+            if skyCont_off
+                meanLocSky .= 0
+                VLocSky .= 0
+            end
+            if skyLines_off
+                meanLocSkyLines .= 0
+                VLocSkyLines .= 0
+                V_skyline_bright .= 0
+                V_skyline_faint .= 0
+            end
 
-        # Make RV Mask for DD Model (else leave as simplemsk)
-        rvmsk = copy(simplemsk)
-        if ddstaronly
-            lshift, rshift = extrema(vcat(map(x -> [extrema(x)...], slvl_tuple)...))
-            lshift = floor(Int, lshift)
-            rshift = ceil(Int, rshift)
-            rvmsk .&= ShiftedArrays.circshift(msk_starCor, rshift)
-            rvmsk .&= ShiftedArrays.circshift(msk_starCor, lshift)
-        end
+            # Make RV Mask for DD Model (else leave as simplemsk)
+            rvmsk = copy(simplemsk)
+            if ddstaronly
+                lshift, rshift = extrema(vcat(map(x -> [extrema(x)...], slvl_tuple)...))
+                lshift = floor(Int, lshift)
+                rshift = ceil(Int, rshift)
+                rvmsk .&= ShiftedArrays.circshift(msk_starCor, rshift)
+                rvmsk .&= ShiftedArrays.circshift(msk_starCor, lshift)
+            end
 
-        ## Select data for use (might want to handle mean more generally)
-        ## Mask full RV scan range
-        Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines)[rvmsk]
-        wave_obs = logUniWaveAPOGEE[rvmsk]
+            ## Select data for use (might want to handle mean more generally)
+            ## Mask full RV scan range
+            Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines)[rvmsk]
+            wave_obs = logUniWaveAPOGEE[rvmsk]
 
-        ## Set up residuals prior
-        A = Diagonal(1 ./ fivar[rvmsk])
-        Ainv = Diagonal(fivar[rvmsk])
+            ## Set up residuals prior
+            A = Diagonal(1 ./ fivar[rvmsk])
+            Ainv = Diagonal(fivar[rvmsk])
 
-        ## Set up priors
-        # V_skyline_bright_c = V_skyline_bright
-        # V_skyline_bright_r = V_skyline_bright_c[simplemsk,:]
-        V_skyline_faint_c = VLocSkyLines
-        V_skyline_faint_r = V_skyline_faint_c[rvmsk, :]
-        # V_skyline_tot_c = hcat(V_skyline_bright_c,V_skyline_faint_c)
-        # V_skyline_tot_r = hcat(V_skyline_bright_r,V_skyline_faint_r)
-        V_skyline_tot_c = V_skyline_faint_c
-        V_skyline_tot_r = V_skyline_faint_r
-        # V_locSky_c = VLocSky
-        # V_locSky_r = V_locSky_c[rvmsk,:]
-        V_starCont_c = abs(starscale0) * V_starcont
-        V_starCont_r = V_starCont_c[rvmsk, :]
+            ## Set up priors
+            # V_skyline_bright_c = V_skyline_bright
+            # V_skyline_bright_r = V_skyline_bright_c[simplemsk,:]
+            V_skyline_faint_c = VLocSkyLines
+            V_skyline_faint_r = V_skyline_faint_c[rvmsk, :]
+            # V_skyline_tot_c = hcat(V_skyline_bright_c,V_skyline_faint_c)
+            # V_skyline_tot_r = hcat(V_skyline_bright_r,V_skyline_faint_r)
+            V_skyline_tot_c = V_skyline_faint_c
+            V_skyline_tot_r = V_skyline_faint_r
+            # V_locSky_c = VLocSky
+            # V_locSky_r = V_locSky_c[rvmsk,:]
+            V_starCont_c = abs(starscale0) * V_starcont
+            V_starCont_r = V_starCont_c[rvmsk, :]
 
-        ## Solve RV of Star
-        # compute stellar continuum to modify stellar line prior
-        # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
-        Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
-        Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
-        x_comp_lst = deblend_components_all_asym(Ctotinv_skylines, Xd_obs, (V_starCont_r,), (V_starCont_c,))
+            ## Solve RV of Star
+            # compute stellar continuum to modify stellar line prior
+            # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
+            Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
+            Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
+            x_comp_lst = deblend_components_all_asym(Ctotinv_skylines, Xd_obs, (V_starCont_r,), (V_starCont_c,))
 
-        # starCont_Mscale_ref = x_comp_lst[1]
-        starCont_Mscale = x_comp_lst[1][rvmsk]
-        # Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines.-starCont_Mscale_ref)[rvmsk];
+            # starCont_Mscale_ref = x_comp_lst[1]
+            starCont_Mscale = x_comp_lst[1][rvmsk]
+            # Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines.-starCont_Mscale_ref)[rvmsk];
 
-        # ## Adjust the starContinuum covariance to be 1% of the "starScale"
-        # starscalep5 = nanzeromedian(starCont_Mscale)
-        # V_starCont_c = starCont_var*abs(starscalep5)*V_starcont
-        # V_starCont_r = V_starCont_c[rvmsk,:]
+            # ## Adjust the starContinuum covariance to be 1% of the "starScale"
+            # starscalep5 = nanzeromedian(starCont_Mscale)
+            # V_starCont_c = starCont_var*abs(starscalep5)*V_starcont
+            # V_starCont_r = V_starCont_c[rvmsk,:]
 
-        # now take out the skylines to be included in the scanning
-        # Vcomb_cur = hcat(V_locSky_r,V_starCont_r);
-        Vcomb_cur = V_starCont_r
-        Ctotinv_cur = LowRankMultMatIP([Ainv, Vcomb_cur], wood_precomp_mult_mat([Ainv, Vcomb_cur], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
+            # now take out the skylines to be included in the scanning
+            # Vcomb_cur = hcat(V_locSky_r,V_starCont_r);
+            Vcomb_cur = V_starCont_r
+            Ctotinv_cur = LowRankMultMatIP([Ainv, Vcomb_cur], wood_precomp_mult_mat([Ainv, Vcomb_cur], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
 
-        # compute delta chi2 for adding skylines (helps normalize the joint chi2 below with starLines)
-        chi2skyoffset = woodbury_update_inv_tst(
-            LowRankMultMatIP([Ainv, Vcomb_cur], wood_precomp_mult_mat([Ainv, Vcomb_cur], (size(Ainv, 1), size(V_skyline_tot_r, 2))), wood_fxn_mult, wood_fxn_mult_mat!),
-            Xd_obs,
-            V_skyline_tot_r
-        )
+            # compute delta chi2 for adding skylines (helps normalize the joint chi2 below with starLines)
+            chi2skyoffset = woodbury_update_inv_tst(
+                LowRankMultMatIP([Ainv, Vcomb_cur], wood_precomp_mult_mat([Ainv, Vcomb_cur], (size(Ainv, 1), size(V_skyline_tot_r, 2))), wood_fxn_mult, wood_fxn_mult_mat!),
+                Xd_obs,
+                V_skyline_tot_r
+            )
 
-        pre_Vslice = zeros(count(rvmsk), size(V_starlines, 2))
-        chi2_wrapper_partial = if rv_split
-            AinvV1 = Ctotinv_cur * V_skyline_tot_r
-            XdAinvV1 = reshape(Xd_obs, 1, :) * AinvV1
-            V1TAinvV1 = V_skyline_tot_r' * AinvV1
-            Base.Fix2(chi2_wrapper_split, (rvmsk, Ctotinv_cur, Xd_obs, starCont_Mscale, V_starlines, pre_Vslice, AinvV1, XdAinvV1, V1TAinvV1, chi2skyoffset))
-        else
-            error("rv_split must be true")
-        end
-        lout = sampler_1d_hierarchy_var(chi2_wrapper_partial, slvl_tuple, minres=minRVres, stepx=RV_err_step)
-        svalc = lout[1][3]
-        push!(out, lout) # 2
+            pre_Vslice = zeros(count(rvmsk), size(V_starlines, 2))
+            chi2_wrapper_partial = if rv_split
+                AinvV1 = Ctotinv_cur * V_skyline_tot_r
+                XdAinvV1 = reshape(Xd_obs, 1, :) * AinvV1
+                V1TAinvV1 = V_skyline_tot_r' * AinvV1
+                Base.Fix2(chi2_wrapper_split, (rvmsk, Ctotinv_cur, Xd_obs, starCont_Mscale, V_starlines, pre_Vslice, AinvV1, XdAinvV1, V1TAinvV1, chi2skyoffset))
+            else
+                error("rv_split must be true")
+            end
+            lout = sampler_1d_hierarchy_var(chi2_wrapper_partial, slvl_tuple, minres=minRVres, stepx=RV_err_step)
+            svalc = lout[1][3]
+            push!(out, lout) # 2
 
-        # re-estiamte starScale before re-creating the priors with the new finalRV msk
-        Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], rvmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
-        x_comp_lst = deblend_components_all_asym(Ctotinv_fut, Xd_obs, (V_starCont_r,), (V_starCont_c,))
+            # re-estiamte starScale before re-creating the priors with the new finalRV msk
+            Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], rvmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
+            x_comp_lst = deblend_components_all_asym(Ctotinv_fut, Xd_obs, (V_starCont_r,), (V_starCont_c,))
 
-        # Change data mask based on final inferred RV
-        finalmsk = copy(simplemsk)
-        if ddstaronly
-            rvshift = sign(lout[1][3]) * ceil(abs(lout[1][3]))
-            finalmsk .&= ShiftedArrays.circshift(msk_starCor, rvshift)
-        end
+            # Change data mask based on final inferred RV
+            finalmsk = copy(simplemsk)
+            if ddstaronly
+                rvshift = sign(lout[1][3]) * ceil(abs(lout[1][3]))
+                finalmsk .&= ShiftedArrays.circshift(msk_starCor, rvshift)
+            end
 
-        starCont_Mscale_ref = x_comp_lst[1]
-        starCont_Mscale = starCont_Mscale_ref[finalmsk]
-        Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines)[finalmsk]
-        wave_obs = logUniWaveAPOGEE[finalmsk]
+            starCont_Mscale_ref = x_comp_lst[1]
+            starCont_Mscale = starCont_Mscale_ref[finalmsk]
+            Xd_obs = (fspec.-meanLocSky.-meanLocSkyLines)[finalmsk]
+            wave_obs = logUniWaveAPOGEE[finalmsk]
 
-        starscale1 = nanzeromedian(starCont_Mscale)
+            starscale1 = nanzeromedian(starCont_Mscale)
 
-        ## Set up residuals prior
-        A = Diagonal(1 ./ fivar[finalmsk])
-        Ainv = Diagonal(fivar[finalmsk])
+            ## Set up residuals prior
+            A = Diagonal(1 ./ fivar[finalmsk])
+            Ainv = Diagonal(fivar[finalmsk])
 
-        ## Set up priors
-        # V_skyline_bright_r = V_skyline_bright_c[simplemsk,:]
-        V_skyline_faint_r = V_skyline_faint_c[finalmsk, :]
-        V_skyline_tot_r = V_skyline_faint_r
-        # V_locSky_r = V_locSky_c[finalmsk,:]
-        V_starCont_c = abs(starscale1) * V_starcont
-        V_starCont_r = V_starCont_c[finalmsk, :]
+            ## Set up priors
+            # V_skyline_bright_r = V_skyline_bright_c[simplemsk,:]
+            V_skyline_faint_r = V_skyline_faint_c[finalmsk, :]
+            V_skyline_tot_r = V_skyline_faint_r
+            # V_locSky_r = V_locSky_c[finalmsk,:]
+            V_starCont_c = abs(starscale1) * V_starcont
+            V_starCont_r = V_starCont_c[finalmsk, :]
 
-        # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
-        Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
-        Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
+            # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
+            Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
+            Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
 
-        x_comp_lst = deblend_components_all(Ctotinv_skylines, Xd_obs, (V_starCont_r,))
-        starCont_Mscale = x_comp_lst[1]
-
-        # update the Ctotinv to include the stellar line component (iterate to refine starCont_Mscale)
-        for i = 1:refine_iters
-            Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], finalmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
-            x_comp_lst = deblend_components_all(Ctotinv_fut, Xd_obs, (V_starCont_r,))
+            x_comp_lst = deblend_components_all(Ctotinv_skylines, Xd_obs, (V_starCont_r,))
             starCont_Mscale = x_comp_lst[1]
+
+            # update the Ctotinv to include the stellar line component (iterate to refine starCont_Mscale)
+            for i = 1:refine_iters
+                Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], finalmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
+                x_comp_lst = deblend_components_all(Ctotinv_fut, Xd_obs, (V_starCont_r,))
+                starCont_Mscale = x_comp_lst[1]
+            end
+            Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], finalmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
+
+            # do a component save without the 15273 DIB
+            # the extra Vstarlines_r is duplicated work if a pure dd model, but helps compare flux conservation in both cases
+            # x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs, 
+            #     (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
+            #     (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
+            # )
+            x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs,
+                (A, V_skyline_faint_r, V_skyline_faint_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
+                (A, V_skyline_faint_r, V_skyline_faint_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
+            )
+
+
+
+            x_comp_out = []
+            push!(x_comp_out, nanify(x_comp_lst[1] .* sqrt.(fivar[finalmsk]), finalmsk)) #z-scored residuals
+            push!(x_comp_out, nanify(x_comp_lst[1], finalmsk)) #residuals
+            # push!(x_comp_out,nanify(x_comp_lst[2][skymsk_bright[finalmsk]],finalmsk .& skymsk_bright)) #bright sky lines
+            push!(x_comp_out, nanify(x_comp_lst[2][skymsk_faint[finalmsk]] .+ meanLocSkyLines[finalmsk.&skymsk_faint], finalmsk .& skymsk_faint)) #faint sky lines
+            push!(x_comp_out, nanify(0 .* x_comp_lst[3][chebmsk_exp] .+ meanLocSky[chebmsk_exp], chebmsk_exp)) #sky continuum #hacked to skylines times zero
+            push!(x_comp_out, nanify(x_comp_lst[4][chebmsk_exp], chebmsk_exp)) #star continuum
+            push!(x_comp_out, x_comp_lst[6:end]...) # starLines, starlines coefficients, and totchi2
+            push!(x_comp_out, nanify(((fspec.-(x_comp_out[3].+x_comp_out[4]))./x_comp_out[5])[finalmsk], finalmsk)) #apVisit analog
+            push!(x_comp_out, finalmsk) # final mask
+            push!(x_comp_out, V_starlines_refLSF[:, :, 6] * x_comp_lst[7]) # Restframe StarLine component with reference LSF
+
+            skyscale1 = nanzeromedian(x_comp_out[4])
+            dvec = (fspec .- (x_comp_out[2] .+ x_comp_out[3] .+ x_comp_out[4] .+ x_comp_out[5] .* (1 .+ nanify(x_comp_lst[5], finalmsk)))) ./ fspec
+            chi2res = x_comp_lst[1]' * (Ainv * x_comp_lst[1])
+            push!(out, (chi2res, nanzeroiqr(dvec), count(finalmsk), starscale1, skyscale1)) # 3
+            push!(out, x_comp_out) # 4
+            dflux_starlines = sqrt_nan.(get_diag_posterior_from_prior_asym(Ctotinv_fut, V_starlines_c, V_starlines_r))
+            push!(out, dflux_starlines) # 5
+
+            # # prepare multiplicative factors for DIB prior
+            # x_comp_lst = deblend_components_all(Ctotinv_fut, Xd_obs, (V_starCont_r,V_starlines_r))
+            # starCont_Mscale = x_comp_lst[1]
+            # starFull_Mscale = starCont_Mscale.+x_comp_lst[2]
+
+            # Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc,Ctotinv_skylines.matList[1],finalmsk,starCont_Mscale,Vcomb_skylines,V_starlines,V_starlines_refLSF)
+            # Ctotinv_cur, Ctotinv_fut = Ctotinv_fut, Ctotinv_cur; Vcomb_cur, Vcomb_fut = Vcomb_fut, Vcomb_cur # swap to updated covariance finally
+
+            # # currently, this is modeling each DIB seperately... I think we want to change this later, just easier parallel structure
+            # for dib_ind = 1:length(dib_center_lst) # eventually need to decide if these are cumulative or not
+            #     V_dib = V_dib_lst[dib_ind_prior[dib_ind]]
+            #     V_dib_soft = V_dib_soft_lst[dib_ind_prior[dib_ind]]
+            #     # V_dib_noLSF = V_dib_noLSF_lst[dib_ind_prior[dib_ind]]
+            #     V_dib_noLSF_soft = V_dib_noLSF_soft_lst[dib_ind_prior[dib_ind]]
+
+            #     pre_Vslice = zeros(count(finalmsk),size(V_dib,2))
+            #     lvltuple_dib = lvltuple_lst[dib_ind]
+            #     dib_center = dib_center_lst[dib_ind]
+            #     # scan_offset deprecated with individual DIB priors
+            #     scan_offset = 0 #findmin(abs.(logUniWaveAPOGEE.-dib_center_lst[dib_ind]))[2].-findmin(abs.(logUniWaveAPOGEE.-dib_center_lst[1]))[2]
+
+            #     ## Solve DIB parameters for just a single DIB
+            #     # one of the main questions is how many times to compute components and where
+            #     chi2_wrapper_partial = Base.Fix2(chi2_wrapper2d,(finalmsk,Ctotinv_cur,Xd_obs,wave_obs,starFull_Mscale,Vcomb_cur,V_dib,pre_Vslice,dib_center,scan_offset))
+            #     lout = sampler_2d_hierarchy_var(chi2_wrapper_partial,lvltuple_dib,step1=DIB_pix_err_step,step2=DIB_sig_err_step,minres1=minDIBvelres,minres2=minDIBsigres)
+            #     opt_tup = lout[1][3]
+            #     push!(out,lout) # 6
+
+            #     ## Shift the marginalization sampling (should this be wrapped inside the function?)
+            #     # especially because we need to do bounds handling
+            #     svalMarg = svalMarg0 .+ opt_tup[1]
+            #     sigMarg = shift_trim_range(sigMarg0,opt_tup[2]; minv=minSigval, maxv=maxSigval)
+            #     samp_lst = Iterators.product(svalMarg,sigMarg)
+
+            #     intupf = (finalmsk,Ctotinv_cur,Xd_obs,wave_obs,starFull_Mscale,Vcomb_cur,V_dib,pre_Vslice,dib_center,scan_offset)
+            #     chi2lst, fluxlst, dfluxlst = sample_chi2_flux_dflux(samp_lst,intupf) #shouldn't this take chi2_wrapper_partial as an argument?
+            #     refchi2val = minimum(chi2lst) #this should just be set to the min found at the 2d step
+            #     lout = marginalize_flux_err(chi2lst, fluxlst, dfluxlst, refchi2val)
+            #     push!(out,lout) # 7
+
+            #     # Compute some final components for export (still need to implement DIB iterative refinement)
+            #     Ctotinv_fut, Vcomb_fut, V_dibc, V_dibr = update_Ctotinv_Vdib_asym(
+            #         opt_tup,Ctotinv_cur.matList[1],finalmsk,starFull_Mscale,Vcomb_cur,V_dib_soft,V_dib_noLSF_soft,scan_offset)
+
+            #     x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs, 
+            #         (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_dibr, V_starlines_r, V_dibr),
+            #         (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_dibr, V_starlines_c, V_dibc),
+            #     )
+
+            #     x_comp_out = []
+            #     push!(x_comp_out,nanify(x_comp_lst[1].*sqrt.(fivar[finalmsk]),finalmsk)) # z-scored residuals
+            #     push!(x_comp_out,nanify(x_comp_lst[1],finalmsk)) # residuals
+            #     # push!(x_comp_out,nanify(x_comp_lst[2][skymsk_bright[finalmsk]],finalmsk .& skymsk_bright)) #bright sky lines
+            #     push!(x_comp_out,nanify(x_comp_lst[2][skymsk_faint[finalmsk]].+meanLocSkyLines[finalmsk .& skymsk_faint],finalmsk .& skymsk_faint)) # faint sky lines
+            #     push!(x_comp_out,nanify(x_comp_lst[3][chebmsk_exp].+meanLocSky[chebmsk_exp],chebmsk_exp)) #sky continuum
+            #     push!(x_comp_out,nanify(x_comp_lst[4][chebmsk_exp],chebmsk_exp)) #star continuum
+            #     push!(x_comp_out,nanify(x_comp_lst[5],finalmsk)) # dib flux 
+            #     push!(x_comp_out,x_comp_lst[6:end]...) # starLines, dib, and totchi2
+
+            #     chi2res = x_comp_lst[1]'*(Ainv*x_comp_lst[1])
+            #     push!(out,(chi2res,)) # 8
+
+            #     push!(out,x_comp_out) # 9
+            # end
+
+            return out
+        catch e
+            println("Error in pipeline_single_spectra for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx")
+            rethrow(e)
         end
-        Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc, Ctotinv_skylines.matList[1], finalmsk, starCont_Mscale, Vcomb_skylines, V_starlines, V_starlines_refLSF)
-
-        # do a component save without the 15273 DIB
-        # the extra Vstarlines_r is duplicated work if a pure dd model, but helps compare flux conservation in both cases
-        # x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs, 
-        #     (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
-        #     (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
-        # )
-        x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs,
-            (A, V_skyline_faint_r, V_skyline_faint_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
-            (A, V_skyline_faint_r, V_skyline_faint_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
-        )
-
-
-
-        x_comp_out = []
-        push!(x_comp_out, nanify(x_comp_lst[1] .* sqrt.(fivar[finalmsk]), finalmsk)) #z-scored residuals
-        push!(x_comp_out, nanify(x_comp_lst[1], finalmsk)) #residuals
-        # push!(x_comp_out,nanify(x_comp_lst[2][skymsk_bright[finalmsk]],finalmsk .& skymsk_bright)) #bright sky lines
-        push!(x_comp_out, nanify(x_comp_lst[2][skymsk_faint[finalmsk]] .+ meanLocSkyLines[finalmsk.&skymsk_faint], finalmsk .& skymsk_faint)) #faint sky lines
-        push!(x_comp_out, nanify(0 .* x_comp_lst[3][chebmsk_exp] .+ meanLocSky[chebmsk_exp], chebmsk_exp)) #sky continuum #hacked to skylines times zero
-        push!(x_comp_out, nanify(x_comp_lst[4][chebmsk_exp], chebmsk_exp)) #star continuum
-        push!(x_comp_out, x_comp_lst[6:end]...) # starLines, starlines coefficients, and totchi2
-        push!(x_comp_out, nanify(((fspec.-(x_comp_out[3].+x_comp_out[4]))./x_comp_out[5])[finalmsk], finalmsk)) #apVisit analog
-        push!(x_comp_out, finalmsk) # final mask
-        push!(x_comp_out, V_starlines_refLSF[:, :, 6] * x_comp_lst[7]) # Restframe StarLine component with reference LSF
-
-        skyscale1 = nanzeromedian(x_comp_out[4])
-        dvec = (fspec .- (x_comp_out[2] .+ x_comp_out[3] .+ x_comp_out[4] .+ x_comp_out[5] .* (1 .+ nanify(x_comp_lst[5], finalmsk)))) ./ fspec
-        chi2res = x_comp_lst[1]' * (Ainv * x_comp_lst[1])
-        push!(out, (chi2res, nanzeroiqr(dvec), count(finalmsk), starscale1, skyscale1)) # 3
-        push!(out, x_comp_out) # 4
-        dflux_starlines = sqrt_nan.(get_diag_posterior_from_prior_asym(Ctotinv_fut, V_starlines_c, V_starlines_r))
-        push!(out, dflux_starlines) # 5
-
-        # # prepare multiplicative factors for DIB prior
-        # x_comp_lst = deblend_components_all(Ctotinv_fut, Xd_obs, (V_starCont_r,V_starlines_r))
-        # starCont_Mscale = x_comp_lst[1]
-        # starFull_Mscale = starCont_Mscale.+x_comp_lst[2]
-
-        # Ctotinv_fut, Vcomb_fut, V_starlines_c, V_starlines_r, V_starlines_ru = update_Ctotinv_Vstarstarlines_asym(svalc,Ctotinv_skylines.matList[1],finalmsk,starCont_Mscale,Vcomb_skylines,V_starlines,V_starlines_refLSF)
-        # Ctotinv_cur, Ctotinv_fut = Ctotinv_fut, Ctotinv_cur; Vcomb_cur, Vcomb_fut = Vcomb_fut, Vcomb_cur # swap to updated covariance finally
-
-        # # currently, this is modeling each DIB seperately... I think we want to change this later, just easier parallel structure
-        # for dib_ind = 1:length(dib_center_lst) # eventually need to decide if these are cumulative or not
-        #     V_dib = V_dib_lst[dib_ind_prior[dib_ind]]
-        #     V_dib_soft = V_dib_soft_lst[dib_ind_prior[dib_ind]]
-        #     # V_dib_noLSF = V_dib_noLSF_lst[dib_ind_prior[dib_ind]]
-        #     V_dib_noLSF_soft = V_dib_noLSF_soft_lst[dib_ind_prior[dib_ind]]
-
-        #     pre_Vslice = zeros(count(finalmsk),size(V_dib,2))
-        #     lvltuple_dib = lvltuple_lst[dib_ind]
-        #     dib_center = dib_center_lst[dib_ind]
-        #     # scan_offset deprecated with individual DIB priors
-        #     scan_offset = 0 #findmin(abs.(logUniWaveAPOGEE.-dib_center_lst[dib_ind]))[2].-findmin(abs.(logUniWaveAPOGEE.-dib_center_lst[1]))[2]
-
-        #     ## Solve DIB parameters for just a single DIB
-        #     # one of the main questions is how many times to compute components and where
-        #     chi2_wrapper_partial = Base.Fix2(chi2_wrapper2d,(finalmsk,Ctotinv_cur,Xd_obs,wave_obs,starFull_Mscale,Vcomb_cur,V_dib,pre_Vslice,dib_center,scan_offset))
-        #     lout = sampler_2d_hierarchy_var(chi2_wrapper_partial,lvltuple_dib,step1=DIB_pix_err_step,step2=DIB_sig_err_step,minres1=minDIBvelres,minres2=minDIBsigres)
-        #     opt_tup = lout[1][3]
-        #     push!(out,lout) # 6
-
-        #     ## Shift the marginalization sampling (should this be wrapped inside the function?)
-        #     # especially because we need to do bounds handling
-        #     svalMarg = svalMarg0 .+ opt_tup[1]
-        #     sigMarg = shift_trim_range(sigMarg0,opt_tup[2]; minv=minSigval, maxv=maxSigval)
-        #     samp_lst = Iterators.product(svalMarg,sigMarg)
-
-        #     intupf = (finalmsk,Ctotinv_cur,Xd_obs,wave_obs,starFull_Mscale,Vcomb_cur,V_dib,pre_Vslice,dib_center,scan_offset)
-        #     chi2lst, fluxlst, dfluxlst = sample_chi2_flux_dflux(samp_lst,intupf) #shouldn't this take chi2_wrapper_partial as an argument?
-        #     refchi2val = minimum(chi2lst) #this should just be set to the min found at the 2d step
-        #     lout = marginalize_flux_err(chi2lst, fluxlst, dfluxlst, refchi2val)
-        #     push!(out,lout) # 7
-
-        #     # Compute some final components for export (still need to implement DIB iterative refinement)
-        #     Ctotinv_fut, Vcomb_fut, V_dibc, V_dibr = update_Ctotinv_Vdib_asym(
-        #         opt_tup,Ctotinv_cur.matList[1],finalmsk,starFull_Mscale,Vcomb_cur,V_dib_soft,V_dib_noLSF_soft,scan_offset)
-
-        #     x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs, 
-        #         (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_dibr, V_starlines_r, V_dibr),
-        #         (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_dibr, V_starlines_c, V_dibc),
-        #     )
-
-        #     x_comp_out = []
-        #     push!(x_comp_out,nanify(x_comp_lst[1].*sqrt.(fivar[finalmsk]),finalmsk)) # z-scored residuals
-        #     push!(x_comp_out,nanify(x_comp_lst[1],finalmsk)) # residuals
-        #     # push!(x_comp_out,nanify(x_comp_lst[2][skymsk_bright[finalmsk]],finalmsk .& skymsk_bright)) #bright sky lines
-        #     push!(x_comp_out,nanify(x_comp_lst[2][skymsk_faint[finalmsk]].+meanLocSkyLines[finalmsk .& skymsk_faint],finalmsk .& skymsk_faint)) # faint sky lines
-        #     push!(x_comp_out,nanify(x_comp_lst[3][chebmsk_exp].+meanLocSky[chebmsk_exp],chebmsk_exp)) #sky continuum
-        #     push!(x_comp_out,nanify(x_comp_lst[4][chebmsk_exp],chebmsk_exp)) #star continuum
-        #     push!(x_comp_out,nanify(x_comp_lst[5],finalmsk)) # dib flux 
-        #     push!(x_comp_out,x_comp_lst[6:end]...) # starLines, dib, and totchi2
-
-        #     chi2res = x_comp_lst[1]'*(Ainv*x_comp_lst[1])
-        #     push!(out,(chi2res,)) # 8
-
-        #     push!(out,x_comp_out) # 9
-        # end
-
-        return out
     end
 end
 
 @everywhere begin
-    function multi_spectra_batch(indsubset; out_dir=out_dir, ddstaronly=ddstaronly)
+    function multi_spectra_batch(indsubset; out_dir=out_dir, ddstaronly=ddstaronly, checkpoint_mode=checkpoint_mode)
         ### Set up
         out = []
         startind = indsubset[1].linear_index
@@ -484,6 +495,7 @@ end
             mkpath(dirName)
         end
         # probably should shift this to a check_file function like in ApogeeReduction.jl
+        # if check_file(savename, mode = checkpoint_mode)
         if !isfile(savename)
             # We are loading the priors EVERY time, so there is no benefit to ordering
             # This is not optimal, but reduces scope confusion
@@ -589,6 +601,8 @@ end
                 (x -> x[metai][6], "flux_nans"),
                 (x -> x[metai][7], "fluxerr2_nans"),
                 (x -> convert(Vector{Int}, x[metai][8]), "simplemsk"),
+                (x -> x[metai][9], "nSkyFibers"),
+                (x -> x[metai][10], "snr"),
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),
@@ -659,6 +673,7 @@ end
             for elelst in extractlst
                 extractor(out, elelst[1], elelst[2], savename)
             end
+            
             hdr_dict = Dict(
                 "pipeline" => "arMADGICS.jl",
                 "git_branch" => git_branch,
@@ -667,6 +682,21 @@ end
             )
             h5write(savename, "hdr", "This is only a header")
             h5writeattr(savename, "hdr", hdr_dict)
+            # # could merge into safe_jldsave-like handling from AR.jl
+            # # add the git info to the metadata
+            # metadata = Dict{String, Any}()
+            # metadata["pipeline"] = "arMADGICS.jl"
+            # metadata["git_branch"] = git_branch
+            # metadata["git_commit"] = git_commit
+            # metadata["git_clean"] = git_clean
+
+            # # add metadata group to the file
+            # h5open(filename, "r+") do f
+            #     g = create_group(f, "metadata")
+            #     for (k, v) in metadata
+            #         g[k] = check_type_for_jld2(v)
+            #     end
+            # end
         end
         return 0
     end
@@ -683,20 +713,34 @@ end
     end
 end
 
+# Collect all (tele, mjd) pairs first
 f = h5open(almanacFile)
-run_lsts = []
-for tele in keys(f)
-    for mjd in keys(f[tele])
-        run_lst = get_telemjd_runlist_from_almanac(almanacFile, tele, mjd)
-        push!(run_lsts, run_lst)
+tele_mjd_pairs = []
+if haskey(f, "raw")
+    for tele in keys(f["raw"])
+        for mjd in keys(f["raw"][tele])
+            push!(tele_mjd_pairs, (tele, mjd))
+        end
+    end
+else
+    for tele in keys(f)
+        for mjd in keys(f[tele])
+            push!(tele_mjd_pairs, (tele, mjd))
+        end
     end
 end
+close(f)
+@everywhere get_telemjd_runlist_from_almanac_partial(argtup) = get_telemjd_runlist_from_almanac(almanacFile, argtup[1], argtup[2])
+run_lsts = pmap(get_telemjd_runlist_from_almanac_partial, tele_mjd_pairs)
 run_lst = vcat(run_lsts...)
 
+# this takes like 5 min to run (speed up)
 iterlst = []
+iterlist_full = []
 Base.length(f::Iterators.Flatten) = sum(length, f.it)
 for adjfiberindx in 1:600
-    subiter = filter(x -> x[end] .== adjfiberindx, run_lst)
+    subiter = filter(x -> x[:adjfiberindx] .== adjfiberindx, run_lst)
+    push!(iterlist_full, subiter)
     indexed_tuples = map(enumerate(subiter)) do (idx, named_tuple)
         merge((linear_index=idx,), named_tuple)
     end
@@ -709,13 +753,36 @@ nwork = length(workers())
 println("Batches to Do: $lenargs, number of workers: $nwork")
 flush(stdout)
 
-# Write the batch information to a simple text file for easy parsing
-println("Writing batch information to file...")
-batch_info_file = joinpath(out_dir, "batch_info.txt")
-dirName = splitdir(batch_info_file)[1]
+# Write flattened iterlist_full to a jld2 file (clean this up later)
+sdss_id_lst = []
+tele_lst = []
+mjd_lst = []
+expnum_lst = []
+adjfiberindx_lst = []
+for iter in iterlist_full
+    push!(sdss_id_lst, map(x -> x.sdss_id, iter))
+    push!(tele_lst, map(x -> x.tele, iter))
+    push!(mjd_lst, map(x -> x.mjd, iter))
+    push!(expnum_lst, map(x -> x.expnum, iter))
+    push!(adjfiberindx_lst, map(x -> x.adjfiberindx, iter))
+end
+sdss_id_all = vcat(sdss_id_lst...)
+tele_all = vcat(tele_lst...)
+mjd_all = vcat(mjd_lst...)
+expnum_all = vcat(expnum_lst...)
+adjfiberindx_all = vcat(adjfiberindx_lst...);
+
+full_list_info_file = joinpath(out_dir, "full_list_info.h5")
+dirName = splitdir(full_list_info_file)[1]
 if !ispath(dirName)
     mkpath(dirName)
 end
+jldsave(full_list_info_file, sdss_id=sdss_id_all, tele=tele_all, mjd=mjd_all, expnum=expnum_all, adjfiberindx=adjfiberindx_all)
+
+# Write the batch information to a simple text file for easy parsing
+println("Writing batch information to file...")
+batch_info_file = joinpath(out_dir, "batch_info.txt")
+
 open(batch_info_file, "w") do io
     println(io, "# Batch information for arMADGICS pipeline")
     println(io, "# Format: linear_index, tele, mjd, expnum, adjfiberindx ")
