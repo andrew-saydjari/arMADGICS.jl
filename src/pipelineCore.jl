@@ -22,10 +22,13 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         # Get the Exposure (Visit) Spectrum
         fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
-        snr = nanzeromedian(fspec ./ sqrt.(fivar))
         starscale0 = nanzeromedian(fspec)
 
         simplemsk = fmsk .& skymsk .& msk_local_skyLines
+        # M1 fix: per-pixel snr is flux/sigma = flux.*sqrt.(ivar); the old
+        # fspec./sqrt.(fivar) was flux*sigma (inverted) and, being computed unmasked,
+        # let ivar=0 pixels inject +/-Inf into the median (nanzero* are now Inf-safe too).
+        snr = median_snr(fspec, fivar, simplemsk)
 
         push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr)) # 1
 

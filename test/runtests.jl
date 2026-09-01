@@ -19,6 +19,7 @@ include(src_dir * "src/chi2Wrappers.jl")
 include(src_dir * "src/pipelineCore.jl")
 
 include("gridSearch.jl")
+include("ingest.jl")
 include("spectraInterpolation.jl")
 include("gaussTests.jl")
 include("utils.jl")
