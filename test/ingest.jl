@@ -114,6 +114,46 @@ end
     @test ingest_fatal(ingestBit)
 end
 
+@testset "M3: apVisit continuum floor" begin
+    npix = 200
+    fspec = fill(100.0, npix)
+    skyLines = fill(5.0, npix)
+    skyCont = fill(15.0, npix)
+    starCont = fill(80.0, npix)
+    finalmsk = trues(npix)
+    finalmsk[1:10] .= false
+    cont_scale = 80.0
+
+    apV = apVisit_from_components(fspec, skyLines, skyCont, starCont, finalmsk, cont_scale)
+    @test length(apV) == npix
+    @test all(isnan.(apV[1:10]))                      # outside finalmsk
+    @test all(apV[11:end] .== (100.0 - 20.0) / 80.0)  # (flux - sky)/cont
+
+    # near-zero and negative-tiny continuum pixels must come back NaN, not +/-huge
+    starCont_bad = copy(starCont)
+    starCont_bad[20] = 1e-8
+    starCont_bad[21] = -1e-8
+    starCont_bad[22] = 0.0
+    starCont_bad[23] = NaN
+    starCont_bad[24] = Inf
+    apV = apVisit_from_components(fspec, skyLines, skyCont, starCont_bad, finalmsk, cont_scale)
+    @test all(isnan.(apV[20:24]))
+    @test all(isfinite.(apV[25:end]))
+    @test apV[30] == 1.0
+
+    # pixels below the relative floor (1e-3 * |cont_scale|) are masked
+    starCont_faint = copy(starCont)
+    starCont_faint[40] = 1e-3 * cont_scale * 0.5 # below floor
+    starCont_faint[41] = 1e-3 * cont_scale * 2.0 # above floor
+    apV = apVisit_from_components(fspec, skyLines, skyCont, starCont_faint, finalmsk, cont_scale)
+    @test isnan(apV[40])
+    @test isfinite(apV[41])
+
+    # non-finite cont_scale (e.g. starscale1 = NaN) masks everything rather than erroring
+    apV = apVisit_from_components(fspec, skyLines, skyCont, starCont, finalmsk, NaN)
+    @test all(isnan.(apV))
+end
+
 @testset "M2: failed_pipeline_out placeholder shapes" begin
     npix = 8700
     nstarcoef = 50

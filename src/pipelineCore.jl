@@ -210,7 +210,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         push!(x_comp_out, nanify(0 .* x_comp_lst[3][chebmsk_exp] .+ meanLocSky[chebmsk_exp], chebmsk_exp)) #sky continuum #hacked to skylines times zero
         push!(x_comp_out, nanify(x_comp_lst[4][chebmsk_exp], chebmsk_exp)) #star continuum
         push!(x_comp_out, x_comp_lst[6:end]...) # starLines, starlines coefficients, and totchi2
-        push!(x_comp_out, nanify(((fspec.-(x_comp_out[3].+x_comp_out[4]))./x_comp_out[5])[finalmsk], finalmsk)) #apVisit analog
+        push!(x_comp_out, apVisit_from_components(fspec, x_comp_out[3], x_comp_out[4], x_comp_out[5], finalmsk, starscale1)) #apVisit analog (M3: continuum-floored)
         push!(x_comp_out, finalmsk) # final mask
         push!(x_comp_out, V_starlines_refLSF[:, :, 6] * x_comp_lst[7]) # Restframe StarLine component with reference LSF
 
@@ -296,6 +296,17 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         flush(stdout)
         return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, collect(length.(slvl_tuple)))
     end
+end
+
+# M3: apVisit analog = (flux - sky) / starContinuum. Pixels whose inferred continuum
+# is non-finite or below rel_floor*|cont_scale| (cont_scale = starscale1, the median
+# inferred continuum) are set to NaN instead of being divided into +/-huge/Inf values
+# (broken or very faint fibers have near-zero continuum). A non-finite cont_scale
+# masks the whole vector.
+function apVisit_from_components(fspec, skyLines, skyCont, starCont, finalmsk, cont_scale; rel_floor=1e-3)
+    cont_floor = rel_floor * abs(cont_scale)
+    ok = finalmsk .& isfinite.(starCont) .& (abs.(starCont) .> cont_floor)
+    return nanify(((fspec .- (skyLines .+ skyCont)) ./ starCont)[ok], ok)
 end
 
 # RV_flag value marking a spectrum that never entered the RV scan (see ingestBit for why)
