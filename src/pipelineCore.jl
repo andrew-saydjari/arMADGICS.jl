@@ -8,10 +8,24 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
     mjd = argtup.mjd
     expnum = argtup.expnum
     adjfiberindx = argtup.adjfiberindx
-    
+
+    # V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF, V_starlines, msk_starCor, V_dib_lst, V_dib_soft_lst, V_dib_noLSF_soft_lst = prior_vec
+    chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor = prior_vec
+
+    # M2: defaults so a failure record with correct shapes can be built even if
+    # ingest itself throws (missing file, malformed almanac entry, ...)
+    npix = length(chebmsk_exp)
+    nstarcoef = size(V_starlines, 2)
+    ingestBit = 0
+    nSkyFibers = 0
+    skyscale0 = NaN
+    starscale0 = NaN
+    snr = NaN
+    simplemsk = falses(npix)
+    fspec = fill(NaN, npix)
+    fivar = fill(NaN, npix)
+
     try
-        # V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF, V_starlines, msk_starCor, V_dib_lst, V_dib_soft_lst, V_dib_noLSF_soft_lst = prior_vec
-        chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor = prior_vec
         out = []
 
         # This could/should shift to a per night preprocessing
@@ -22,15 +36,28 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         # Get the Exposure (Visit) Spectrum
         fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
-        starscale0 = nanzeromedian(fspec)
 
-        simplemsk = fmsk .& skymsk .& msk_local_skyLines
+        # M2/M3: sanity-check the spectrum before it can poison or kill the solve;
+        # validate_exposure also strips non-finite flux/ivar and tiny-ivar pixels
+        fmsk_clean, starscale0, ingestBit = validate_exposure(fspec, fivar, fmsk)
+
+        simplemsk = fmsk_clean .& skymsk .& msk_local_skyLines
         # M1 fix: per-pixel snr is flux/sigma = flux.*sqrt.(ivar); the old
         # fspec./sqrt.(fivar) was flux*sigma (inverted) and, being computed unmasked,
         # let ivar=0 pixels inject +/-Inf into the median (nanzero* are now Inf-safe too).
         snr = median_snr(fspec, fivar, simplemsk)
 
-        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr)) # 1
+        # combining with the sky/cheb masks can only shrink the good-pixel set
+        if count(simplemsk) < INGEST_MIN_GOODPIX
+            ingestBit |= 2^2
+        end
+        if ingest_fatal(ingestBit)
+            println("Skipping spectrum (ingestBit=$ingestBit) for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx")
+            flush(stdout)
+            return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, collect(length.(slvl_tuple)))
+        end
+
+        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr, ingestBit)) # 1
 
         if skyCont_off
             meanLocSky .= 0
@@ -262,7 +289,52 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         return out
     catch e
-        println("Error in pipeline_single_spectra for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx")
-        rethrow(e)
+        # M2: per-spectrum failures are non-fatal — record a failure code in the
+        # batch output instead of killing the whole pmap (the old code rethrew here)
+        ingestBit |= INGEST_RUNTIME_ERROR_BIT
+        println("Error in pipeline_single_spectra for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx (recorded ingestBit=$ingestBit): ", sprint(showerror, e))
+        flush(stdout)
+        return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, collect(length.(slvl_tuple)))
     end
+end
+
+# RV_flag value marking a spectrum that never entered the RV scan (see ingestBit for why)
+const INGEST_FAIL_RV_FLAG = 2^6
+
+"""
+    failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, lvllens)
+
+Build a placeholder `out` with EXACTLY the same nesting/shapes as a successful
+`pipeline_single_spectra` return, so `extractor`/`multi_spectra_batch` can save
+mixed success/failure batches. All science quantities are NaN (counts 0, masks
+false); the failure reason is carried in the `ingestBit` column (bit codes in
+src/ingest.jl) and `RV_flag` is set to `INGEST_FAIL_RV_FLAG`.
+"""
+function failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, lvllens)
+    npix = length(simplemsk)
+    out = []
+    # 1: meta block (mirrors the success push, incl. the new ingestBit column)
+    push!(out, (count(simplemsk), starscale0, skyscale0,
+        nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk),
+        count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])),
+        simplemsk, nSkyFibers, snr, ingestBit))
+    # 2: RV block (sampler_1d_hierarchy_var shape)
+    lvlouts = [((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG), fill(NaN, n), fill(NaN, n)) for n in lvllens]
+    push!(out, ((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG, NaN), lvlouts))
+    # 3: (chi2res, avg_flux_conservation, final_pix_cnt, starscale1, skyscale1)
+    push!(out, (NaN, NaN, 0, NaN, NaN))
+    # 4: component block (11 entries mirroring x_comp_out)
+    x_comp_out = []
+    for i = 1:6
+        push!(x_comp_out, fill(NaN, npix)) # z-resid, resid, skyLines, skyCont, starCont, starLines
+    end
+    push!(x_comp_out, fill(NaN, nstarcoef)) # starLines coefficients
+    push!(x_comp_out, NaN) # tot_p5chi2
+    push!(x_comp_out, fill(NaN, npix)) # apVisit analog
+    push!(x_comp_out, falses(npix)) # final mask
+    push!(x_comp_out, fill(NaN, npix)) # restframe starLines
+    push!(out, x_comp_out)
+    # 5: dflux_starlines
+    push!(out, fill(NaN, npix))
+    return out
 end

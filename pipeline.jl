@@ -341,6 +341,7 @@ end
                 (x -> convert(Vector{Int}, x[metai][8]), "simplemsk"),
                 (x -> x[metai][9], "nSkyFibers"),
                 (x -> x[metai][10], "snr"),
+                (x -> x[metai][11], "ingestBit"), # M2: per-spectrum ingest/failure code (bits in src/ingest.jl)
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),
@@ -537,8 +538,15 @@ end
 println("Batch information written to: $batch_info_file")
 flush(stdout)
 
-pout = @showprogress pmap(multi_spectra_batch, ittot)
-# pout = @showprogress pmap(multi_spectra_batch,ittot,on_error=ex->2)
+# M2: batch-level failures (prior load, HDF5 write, ...) must not kill the whole
+# pmap; per-spectrum failures are already handled inside pipeline_single_spectra.
+# Failed batches are logged and marked with 1 in pout_arMADGICS.txt (success = 0).
+batch_on_error = ex -> begin
+    println("multi_spectra_batch failed (batch skipped, marked 1 in pout): ", sprint(showerror, ex))
+    flush(stdout)
+    1
+end
+pout = @showprogress pmap(multi_spectra_batch, ittot; on_error = batch_on_error)
 writedlm(out_dir * "pout_arMADGICS.txt", pout)
 rmprocs(workers())
 

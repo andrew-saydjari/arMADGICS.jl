@@ -59,6 +59,79 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     return nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines
 end
 
+## M2/M3 ingest guards
+# Minimum number of good pixels (out of 8700) required to attempt the MADGICS solve
+const INGEST_MIN_GOODPIX = 500
+# Pixels with ivar below this fraction of the median good-pixel ivar are masked (M3):
+# AR's good_pix only requires ivar > 1e-20, so tiny-but-nonzero ivar pixels otherwise
+# enter Diagonal(1 ./ fivar) with ~1e20 variances and dominate the deblend.
+const INGEST_TINY_IVAR_RELFAC = 1e-6
+
+# ingestBit failure/flag codes (recorded per spectrum in the batch output):
+#   2^0 runtime error caught during the solve (spectrum skipped)
+#   2^1 flux is entirely NaN/zero                              (fatal -> skip)
+#   2^2 fewer than INGEST_MIN_GOODPIX good pixels after checks (fatal -> skip)
+#   2^3 non-finite flux inside the good mask (pixels masked)
+#   2^4 non-finite or non-positive ivar inside the good mask (pixels masked)
+#   2^5 tiny-ivar pixels masked (below INGEST_TINY_IVAR_RELFAC * median good ivar)
+#   2^6 starscale0 = nanzeromedian(flux) non-finite or <= 0    (fatal -> skip)
+const INGEST_RUNTIME_ERROR_BIT = 2^0
+const INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6
+
+ingest_fatal(ingestBit::Int) = (ingestBit & INGEST_FATAL_BITS) != 0
+
+"""
+    validate_exposure(fspec, fivar, fmsk; min_goodpix, tiny_ivar_relfac)
+
+Sanity-check a 1D uni-cal spectrum before it enters the MADGICS solve (M2/M3).
+Returns `(msk, starscale0, ingestBit)` where `msk` is the good-pixel mask with
+non-finite flux, non-finite/non-positive ivar, and tiny-ivar pixels removed,
+`starscale0 = nanzeromedian(fspec)`, and `ingestBit` encodes the flag bits above.
+Callers should skip the spectrum (but not crash) when `ingest_fatal(ingestBit)`.
+"""
+function validate_exposure(fspec, fivar, fmsk;
+        min_goodpix::Int = INGEST_MIN_GOODPIX,
+        tiny_ivar_relfac::Float64 = INGEST_TINY_IVAR_RELFAC)
+    ingestBit = 0
+    msk = Bool.(fmsk)
+
+    if all(isnanorzero, fspec)
+        ingestBit |= 2^1 # flux is literally all NaNs/zeros (cf. A4 upstream bug)
+    end
+
+    badflux = msk .& .!isfinite.(fspec)
+    if any(badflux)
+        ingestBit |= 2^3
+        msk = msk .& .!badflux
+    end
+
+    badivar = msk .& (.!isfinite.(fivar) .| (fivar .<= 0))
+    if any(badivar)
+        ingestBit |= 2^4
+        msk = msk .& .!badivar
+    end
+
+    if any(msk)
+        medivar = median(fivar[msk])
+        tinyivar = msk .& (fivar .< tiny_ivar_relfac * medivar)
+        if any(tinyivar)
+            ingestBit |= 2^5
+            msk = msk .& .!tinyivar
+        end
+    end
+
+    starscale0 = nanzeromedian(fspec)
+    if !(isfinite(starscale0) && (starscale0 > 0))
+        ingestBit |= 2^6
+    end
+
+    if count(msk) < min_goodpix
+        ingestBit |= 2^2
+    end
+
+    return msk, starscale0, ingestBit
+end
+
 function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     fiberindx = adjfiberindx2fiberindx(adjfiberindx)
     ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
