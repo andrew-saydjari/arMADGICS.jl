@@ -79,6 +79,13 @@ function parse_commandline()
         "--skip-crosscheck"
         help = "skip the 26M-row batch_info.txt crosscheck (for smoke tests only)"
         action = :store_true
+        "--chunk"
+        help = "batches per checkpointed work chunk"
+        arg_type = Int
+        default = 2000
+        "--resume"
+        help = "resume row checks from <out>.ckpt if present (corpus-level checks rerun; row selection is deterministic given the same seed/K)"
+        action = :store_true
     end
     return parse_args(s)
 end
@@ -387,10 +394,39 @@ work = [BatchWork(id, rec.paths[id], length(batch_within_range(fidx, id)),
 n_rows_to_check = sum(length(w.rows) for w in work)
 logmsg("Row checks queued: $n_rows_to_check rows across $(length(work)) batches")
 
-# ---- 6. distributed row checks ---------------------------------------------
-logmsg("Running distributed checks on $(nworkers()) workers...")
+# ---- 6. distributed row checks (chunked, checkpointed) ----------------------
+using Serialization
+ckptpath = outpath * ".ckpt"
+results = BatchResult[]
+done_ids = Set{BatchId}()
+if parg["resume"] && isfile(ckptpath)
+    ck = open(deserialize, ckptpath)
+    results = ck.results
+    done_ids = Set(br.id for br in results)
+    logmsg("Resumed checkpoint: $(length(done_ids)) batches already checked")
+end
+todo = [w for w in work if !(w.id in done_ids)]
+logmsg("Running distributed checks on $(nworkers()) workers ($(length(todo)) batches to do)...")
 process_one = bw -> process_batch(bw; ref_keyinfo = ref_keyinfo, reduxBase = reduxBase)
-results = pmap(process_one, work; batch_size = 25)
+
+function run_chunks!(results, todo, ntotal, nchunk, ckptpath)
+    i = 1
+    while i <= length(todo)
+        j = min(i + nchunk - 1, length(todo))
+        tchunk0 = time()
+        append!(results, pmap(process_one, todo[i:j]; batch_size = 25))
+        # atomic checkpoint: write tmp then rename
+        tmp = ckptpath * ".tmp"
+        open(io -> serialize(io, (results = results,)), tmp, "w")
+        mv(tmp, ckptpath; force = true)
+        rate = (j - i + 1) / (time() - tchunk0)
+        eta = round(Int, (length(todo) - j) / max(rate, 1e-9))
+        logmsg(@sprintf("  checked %d / %d batches (%.1f batches/s, ETA %ds)",
+            length(results), ntotal, rate, eta))
+        i = j + 1
+    end
+end
+run_chunks!(results, todo, length(work), max(parg["chunk"], 1), ckptpath)
 logmsg("Row checks complete.")
 
 # ---- 7. aggregate ----------------------------------------------------------
@@ -570,4 +606,5 @@ end
 
 logmsg("Report written to $outpath")
 logmsg("VERDICTS: completeness=$verdict_completeness rows=$verdict_rows shifts=$(length(shift_rows))")
+isfile(ckptpath) && rm(ckptpath)   # report written; checkpoint no longer needed
 rmprocs(workers())
