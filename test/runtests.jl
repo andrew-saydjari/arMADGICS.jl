@@ -16,6 +16,7 @@ include(src_dir * "src/lowRankPrescription.jl")
 include(src_dir * "src/marginalizeEW.jl")
 include(src_dir * "src/spectraInterpolation.jl")
 include(src_dir * "src/chi2Wrappers.jl")
+include(src_dir * "src/pipelineCore.jl")
 
 include("gridSearch.jl")
 include("spectraInterpolation.jl")
