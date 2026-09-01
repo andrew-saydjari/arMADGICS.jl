@@ -213,6 +213,13 @@ const RCPATH = joinpath(@__DIR__, "RowContract.jl")
                 end
             end
             haskey(fb, "hdr") || push!(integrity, "missing hdr dataset")
+            # reference keys absent from this file (e.g. batch truncated by a
+            # mid-write kill) are as important as wrong shapes
+            if !isnothing(ref_keyinfo)
+                for k in keys(ref_keyinfo)
+                    haskey(fb, k) || push!(integrity, "missing key $k")
+                end
+            end
             nrow_actual = haskey(fb, "adjfiberindx") ? length(fb["adjfiberindx"]) : -1
 
             d_flux = fb["flux"]
