@@ -14,7 +14,9 @@ mixing module libraries into their manifests would poison them.
 | OpenMPI | 5.0.6 | `module load openmpi/5.0.6` → `/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6` |
 | HDF5 (parallel) | 1.14.5 | `module load hdf5/mpi-1.14.5` → `/mnt/sw/nix/store/mh5b4q8vqxcdcmirjnr18v3r6g4ix8by-hdf5-1.14.5` |
 | cephtweaks | LD_PRELOAD `libcephtweaks.so`, `CEPHTWEAKS_LAZYIO=1` | `module load cephtweaks` |
-| MPI.jl / HDF5.jl / MPIPreferences.jl | see Manifest.toml | |
+| MPI.jl | 0.20.27 | Manifest.toml |
+| HDF5.jl | 0.17.3 | Manifest.toml |
+| MPIPreferences.jl | 0.1.12 | Manifest.toml |
 
 This is the same module stack acasey's Python MPI workup used (his
 `setup.sh`: cephtweaks + `CEPHTWEAKS_LAZYIO=1`, openmpi/5.0.6,
