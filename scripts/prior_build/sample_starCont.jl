@@ -37,7 +37,7 @@ println("Running Main on ", gethostname()); flush(stdout);
     using ApogeeReduction, DataFrames, ParallelDataTransfer
     using StatsBase, ProgressMeter
     using SortFilters, BasisFunctions, Random, DustExtinction, DelimitedFiles
-    using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx
+    using ApogeeReduction: check_type_for_jld2, adjFiberIndx2FiberIndx, get_lsf_matrix
 end
 
 @passobj 1 workers() proj_path
@@ -79,8 +79,8 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     prior_dict = Dict{String,String}()
 
     # Data for Cals (not really a prior, but an input the results depend on in detail)
-    prior_dict["LSF_mat_APO"] = prior_dir*"2026_04_25/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_01 by AKS
-    prior_dict["LSF_mat_LCO"] = prior_dir*"2026_04_26/mat_lsf_out/sp_combolsfmat_norm_6_" # last made 2023_04_07 by AKS
+    prior_dict["LSF_path_APO"] = prior_dir*"2026_04_27/fpiLSFparams_REGULARIZED_apo_60861.h5"
+    prior_dict["LSF_path_LCO"] = prior_dir*"2026_04_27/fpiLSFparams_REGULARIZED_lco_60861.h5"
     prior_dict["fracTellSamples_APO"] = prior_dir*"2026_04_25/outsamptell_apo.jdat" # last made 2023_04_03 by AKS
     prior_dict["fracTellSamples_LCO"] = prior_dir*"2026_04_26/outsamptell_lco.jdat" # last made 2023_04_07 by AKS
 
@@ -118,13 +118,13 @@ end
         return nothing
     end
 
-    function genModSamp(intup,tellFracSamples,tfun_path,Ksp,nvecLSF,Atell,fiberindx)
+    function genModSamp(intup,tellFracSamples,tfun_path,Ksp,Atell,fiberindx)
         Teff,Av,Rv,Tfunindx,Tfracindx = intup
         bbs = blackbody.(Ref(Teff), x_model*1e-8);
         rvec = redden_mult(x_model,Av,Rv);
         TfunSamplef = get_tfun_file(tfun_path)
         Tfunsample = exp.(Atell*TfunSamplef["theta"][:,fiberindx,Tfunindx])
-        return tellFracSamples[:,Tfracindx].*Tfunsample./nanzeromedian(Tfunsample).*((Ksp*(rvec.*bbs))./nvecLSF);
+        return tellFracSamples[:,Tfracindx].*Tfunsample./nanzeromedian(Tfunsample).*(Ksp*(rvec.*bbs));
     end
 end
 
@@ -136,12 +136,10 @@ end
         mkpath(dirname(savename))
         if !isfile(savename)
             Ksp = if adjfibindx>300
-                deserialize(prior_dict["LSF_mat_LCO"]*lpad(adjfibindx-300,3,"0")*".jdat");
+                get_lsf_matrix(adjfibindx, prior_dict["LSF_path_LCO"]);
             else
-                deserialize(prior_dict["LSF_mat_APO"]*lpad(adjfibindx,3,"0")*".jdat");
+                get_lsf_matrix(adjfibindx, prior_dict["LSF_path_APO"]);
             end
-
-            nvecLSF = dropdims(sum(Ksp,dims=2),dims=2); # used only in starCont sample gen
 
             # Get tell obs to use from disk
             tfun_path =  if adjfibindx > 300
@@ -177,7 +175,7 @@ end
             Tfracindx_lst = rand(rng,1:size(tellFracSamples,2),nsamp);
             itobj = Iterators.zip(Teff_lst,Av_lst,Rv_lst,Tfunindx_lst,Tfracindx_lst)
 
-            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,tfun_path,Ksp,nvecLSF,Atell,fiberindx)
+            genModSamp_bound(itobj) = genModSamp(itobj,tellFracSamples,tfun_path,Ksp,Atell,fiberindx)
             pout = if loc_parallel
                 @showprogress pmap(genModSamp_bound,itobj); #not very fast because of passing
             else
