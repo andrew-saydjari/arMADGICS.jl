@@ -162,7 +162,8 @@ end
     fspec = fill(NaN, npix)
     fivar = fill(NaN, npix)
     ingestBit = 2^1 | 2^2
-    out = failed_pipeline_out(simplemsk, NaN, NaN, fspec, fivar, 0, NaN, ingestBit, nstarcoef, lvllens)
+    skyBit = 2^0
+    out = failed_pipeline_out(simplemsk, NaN, NaN, fspec, fivar, 0, NaN, ingestBit, skyBit, nstarcoef, lvllens)
 
     @test length(out) == 5
     # meta block: same accessors multi_spectra_batch uses
@@ -171,7 +172,8 @@ end
     @test isnan(meta[2]) && isnan(meta[3])
     @test length(meta[4]) == npix && length(meta[5]) == npix
     @test meta[8] === simplemsk
-    @test meta[11] == ingestBit          # new ingestBit column
+    @test meta[11] == ingestBit          # ingestBit column
+    @test meta[12] == skyBit             # M-SKY skyBit column
     # RV block
     @test isnan(Float64.(out[2][1][1]))  # RV_pixoff_final
     @test out[2][1][6] == INGEST_FAIL_RV_FLAG
@@ -190,4 +192,130 @@ end
     @test out[4][8] isa Float64          # tot_p5chi2 scalar
     @test out[4][10] == falses(npix)     # final mask
     @test length(out[5]) == npix         # dflux_starlines
+end
+
+@testset "M-SKY: validate_sky_fiber" begin
+    npix = 8700
+    flux = fill(100.0, npix)
+    flux[1:200] .= 0.0 # chip-gap-like zeros are fine
+    ivar = fill(1.0, npix)
+    msk = trues(npix)
+    msk[1:200] .= false
+
+    # healthy sky fiber: usable
+    @test validate_sky_fiber(flux, ivar, msk) == 0
+
+    # a single non-finite pixel anywhere is enough to poison VLocSkyLines -> excluded
+    flux_nan = copy(flux); flux_nan[4000] = NaN
+    @test (validate_sky_fiber(flux_nan, ivar, msk) & SKYFIB_NONFINITE_BIT) != 0
+    flux_inf = copy(flux); flux_inf[4000] = Inf
+    @test (validate_sky_fiber(flux_inf, ivar, msk) & SKYFIB_NONFINITE_BIT) != 0
+    # even at a pixel that is masked-bad for the fiber itself (the prior is built unmasked)
+    flux_nan2 = copy(flux); flux_nan2[10] = NaN # inside the msk=false region
+    @test (validate_sky_fiber(flux_nan2, ivar, msk) & SKYFIB_NONFINITE_BIT) != 0
+
+    # the A4 upstream shape: all-NaN flux presented with an all-good mask
+    bit = validate_sky_fiber(fill(NaN, npix), fill(NaN, npix), trues(npix))
+    @test (bit & SKYFIB_NONFINITE_BIT) != 0
+    @test (bit & SKYFIB_ALLNANZERO_BIT) != 0
+    @test (bit & SKYFIB_LOWGOODPIX_BIT) != 0
+    @test (bit & SKYFIB_BADSCALE_BIT) != 0
+
+    # all-zero flux (finite, but no data)
+    bit = validate_sky_fiber(zeros(npix), ivar, msk)
+    @test (bit & SKYFIB_ALLNANZERO_BIT) != 0
+    @test (bit & SKYFIB_BADSCALE_BIT) != 0
+    @test (bit & SKYFIB_NONFINITE_BIT) == 0
+
+    # too few good pixels (mask, bad ivar both shrink the count)
+    msk_few = falses(npix); msk_few[1:(SKY_MIN_GOODPIX-1)] .= true
+    @test (validate_sky_fiber(flux, ivar, msk_few) & SKYFIB_LOWGOODPIX_BIT) != 0
+    ivar_bad = zeros(npix)
+    @test (validate_sky_fiber(flux, ivar_bad, msk) & SKYFIB_LOWGOODPIX_BIT) != 0
+
+    # non-positive median flux
+    @test (validate_sky_fiber(fill(-5.0, npix), ivar, msk) & SKYFIB_BADSCALE_BIT) != 0
+end
+
+@testset "M-SKY: combine_sky_fibers" begin
+    npix = 2000
+    nsky = 8
+    rng = Random.MersenneTwister(1234)
+    base = 50.0 .+ 10.0 .* rand(rng, npix)
+    skyspec = base .* (0.8 .+ 0.4 .* rand(rng, 1, nsky)) .+ randn(rng, npix, nsky)
+    skyspec[1:20, :] .= 0.0 # chip-gap-like pixels: zero in every fiber
+    skyivar = ones(npix, nsky)
+    skymsk = trues(npix, nsky)
+
+    # healthy: outputs are bit-identical to the pre-guard formulas
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec, skyivar, skymsk)
+    @test nSky == nsky
+    @test skyBit == 0
+    @test all(mskSky)
+    @test all(bits .== 0)
+    mean_ref = dropdims(nanzeromean(skyspec, 2), dims=2)
+    finrows = isfinite.(mean_ref)
+    @test mskloc == finrows
+    @test all(.!finrows[1:20]) # all-zero pixels carry no sky info
+    @test meanL[finrows] == mean_ref[finrows]
+    @test V[finrows, :] == ((skyspec .- mean_ref) ./ sqrt(nsky))[finrows, :]
+    # and the guard zeroes what the pre-guard code left as NaN
+    @test all(meanL[.!finrows] .== 0)
+    @test all(V[.!finrows, :] .== 0)
+    @test all(isfinite, V) && all(isfinite, meanL)
+
+    # one partially-NaN sky fiber: excluded; survivors match the healthy-subset construction
+    skyspec_p = copy(skyspec)
+    skyspec_p[100:2:end, 3] .= NaN
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec_p, skyivar, skymsk)
+    @test nSky == nsky - 1
+    @test (skyBit & SKY_EXCLUDED_FIBER_BIT) != 0
+    @test !mskSky[3] && (bits[3] & SKYFIB_NONFINITE_BIT) != 0
+    @test all(isfinite, V) && all(isfinite, meanL)
+    keep = setdiff(1:nsky, 3)
+    nSky2, meanL2, V2, mskloc2, skyBit2, _, _ = combine_sky_fibers(skyspec[:, keep], skyivar[:, keep], skymsk[:, keep])
+    @test skyBit2 == 0
+    @test meanL == meanL2 && V == V2 && mskloc == mskloc2
+
+    # all-NaN (A4) sky fiber: excluded and flagged (pre-guard it was only dropped by
+    # the accident that its NaN scale fails the z-cut comparison)
+    skyspec_a = copy(skyspec)
+    skyspec_a[:, 5] .= NaN
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec_a, skyivar, skymsk)
+    @test nSky == nsky - 1
+    @test (skyBit & SKY_EXCLUDED_FIBER_BIT) != 0
+    @test (bits[5] & SKYFIB_ALLNANZERO_BIT) != 0
+    @test all(isfinite, V)
+
+    # scale z-cut outlier: excluded via the pre-existing cut, recorded
+    skyspec_z = copy(skyspec)
+    skyspec_z[:, 2] .*= 1e6
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec_z, skyivar, skymsk)
+    @test nSky == nsky - 1
+    @test (skyBit & SKY_ZCUT_FIBER_BIT) != 0
+    @test (bits[2] & SKYFIB_ZCUT_BIT) != 0
+    @test (skyBit & SKY_EXCLUDED_FIBER_BIT) == 0
+
+    # too few surviving fibers: flagged no-op sky component (zeros), never NaN
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec[:, 1:2], skyivar[:, 1:2], skymsk[:, 1:2])
+    @test nSky == 2
+    @test (skyBit & SKY_TOO_FEW_FIBERS_BIT) != 0
+    @test size(V) == (npix, 1)
+    @test all(V .== 0) && all(meanL .== 0)
+    @test all(mskloc)
+
+    # every candidate bad: fallback, both flags
+    allbad = fill(NaN, npix, 3)
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(allbad, ones(npix, 3), trues(npix, 3))
+    @test nSky == 0
+    @test (skyBit & SKY_TOO_FEW_FIBERS_BIT) != 0
+    @test (skyBit & SKY_EXCLUDED_FIBER_BIT) != 0
+    @test all(V .== 0) && all(meanL .== 0)
+
+    # degenerate spread (identical scales -> IQR = 0): keep all fibers instead of the
+    # pre-guard behavior (0/0 z-scores silently discarded every fiber)
+    ident = repeat(base, 1, 4)
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(ident, ones(npix, 4), trues(npix, 4))
+    @test nSky == 4
+    @test skyBit == 0
 end
