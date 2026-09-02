@@ -245,4 +245,22 @@ end
     end
 end
 
+@testset "fiber-filtered discovery + nrow-based integrity method" begin
+    mktempdir() do dir
+        fli, fidx = synth_corpus(dir)
+        disc7 = discover_batches(dir; fibers = 7:7)
+        @test sort(collect(keys(disc7))) == [BatchId(7, 1), BatchId(7, 4)]
+        disc25 = discover_batches(dir; fibers = 2:5)
+        @test length(disc25) == 4
+        # nrow-based method agrees with the FiberIndex-based one
+        p = disc7[BatchId(7, 4)]
+        ki = discover_keys(p)
+        @test check_batch_integrity(p, 2; ref_keyinfo = ki) ==
+              check_batch_integrity(p, BatchId(7, 4), fidx; ref_keyinfo = ki)
+        @test !isempty(check_batch_integrity(p, 3; ref_keyinfo = ki))
+    end
+end
+
 println("All RowContract tests passed.")
+
+include(joinpath(@__DIR__, "test_workup_serial.jl"))
