@@ -78,14 +78,25 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     # Prior Dictionary
     prior_dict = Dict{String,String}()
 
+    # Secured prior inputs (plan v2 P1/E2; provenance + sha256 in prior_inputs/PROVENANCE.md)
+    prior_inputs_dir = prior_dir*"2026_08_31/prior_inputs/"
+
     # Data for Cals (not really a prior, but an input the results depend on in detail)
-    prior_dict["LSF_path_APO"] = prior_dir*"2026_04_27/fpiLSFparams_REGULARIZED_apo_60861.h5"
-    prior_dict["LSF_path_LCO"] = prior_dir*"2026_04_27/fpiLSFparams_REGULARIZED_lco_60861.h5"
+    prior_dict["LSF_path_APO"] = prior_inputs_dir*"lsf_20260427/fpiLSFparams_REGULARIZED_apo_60861.h5"
+    prior_dict["LSF_path_LCO"] = prior_inputs_dir*"lsf_20260427/fpiLSFparams_REGULARIZED_lco_60861.h5"
     prior_dict["fracTellSamples_APO"] = prior_dir*"2026_04_25/outsamptell_apo.jdat" # last made 2023_04_03 by AKS
     prior_dict["fracTellSamples_LCO"] = prior_dir*"2026_04_26/outsamptell_lco.jdat" # last made 2023_04_07 by AKS
 
-    # Location of the Tfun samples
-    tell_base = "/mnt/home/acasey/scratch/20260220-arjl-domeflats/"
+    # Location of the Tfun samples (secured copy of acasey's delivered 20260220-arjl-domeflats
+    # products; the original /mnt/home/acasey/scratch/ path is DEAD).
+    # FUTURE (card E3): once the bug-fixed telluric transfer-function refit products exist
+    # (T_out=T_init rerun bug fixed, 20260323.py:314-321), point tell_base at the new dated
+    # tfun directory. Override without editing this file via the ARM_TFUN_BASE env var, e.g.
+    #   ARM_TFUN_BASE=/mnt/ceph/users/sdssv/work/asaydjari/<E3_date>/tfun_refit/ julia --project=. ...
+    # (expects <tell_base>/20260323_{apo,lco}.h5-shaped files; update the filenames below if
+    # the E3 rerun renames them).
+    tell_base = get(ENV, "ARM_TFUN_BASE",
+        prior_inputs_dir*"tellurics_20260220_arjl_domeflats/")
     prior_dict["tfun_samples_APO"] = tell_base*"20260323_apo.h5"
     prior_dict["tfun_samples_LCO"] = tell_base*"20260323_lco.h5"
     prior_dict["tfun_sample_lst_APO"] = prior_dir*"2026_04_25/20260323_apo_tfunlist.jdat"
