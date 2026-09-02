@@ -5,36 +5,50 @@ function isnanorzero(x)
     return isnan(x) | iszero(x)
 end
 
-nanzeromean(x) = if all(isnanorzero,x)
+# Inf-safe predicate for the nanzero* statistics (M1): NaN, +/-Inf, and 0 all count as "no data".
+# Before this, ivar=0 pixels turned flux./sqrt.(ivar) into +/-Inf values that nanzeromedian
+# did NOT filter, polluting the delivered snr column (see 0.2.0 QA).
+function isnanorzeroorinf(x)
+    return !isfinite(x) | iszero(x)
+end
+
+nanzeromean(x) = if all(isnanorzeroorinf,x)
     NaN
 else
-    mean(filter(!isnanorzero,x))
+    mean(filter(!isnanorzeroorinf,x))
 end
 nanzeromean(x,y) = mapslices(nanzeromean,x,dims=y)
 
 nansum(x) = sum(filter(!isnan,x))
 nansum(x,y) = mapslices(nansum,x,dims=y)
 
-nanzerosum(x) = if all(isnanorzero,x)
+nanzerosum(x) = if all(isnanorzeroorinf,x)
     NaN
 else
-    sum(filter(!isnanorzero,x))
+    sum(filter(!isnanorzeroorinf,x))
 end
 nanzerosum(x,y) = mapslices(nanzerosum,x,dims=y)
 
-nanzeromedian(x) = if all(isnanorzero,x)
+nanzeromedian(x) = if all(isnanorzeroorinf,x)
     NaN
 else
-    median(filter(!isnanorzero,x))
+    median(filter(!isnanorzeroorinf,x))
 end
 nanzeromedian(x,y) = mapslices(nanzeromedian,x,dims=y)
 
-nanzeroiqr(x) = if all(isnanorzero,x)
+nanzeroiqr(x) = if all(isnanorzeroorinf,x)
     NaN
 else
-    iqr(filter(!isnanorzero,x))/1.34896
+    iqr(filter(!isnanorzeroorinf,x))/1.34896
 end
 nanzeroiqr(x,y) = mapslices(nanzeroiqr,x,dims=y)
+
+# M1: median per-pixel signal-to-noise over the good-pixel mask.
+# snr per pixel = flux/sigma = flux*sqrt(ivar). Masking first keeps ivar=0
+# (masked/no-data) pixels from contributing 0s or Infs to the median.
+function median_snr(fspec, fivar, msk)
+    return nanzeromedian((fspec .* sqrt.(fivar))[msk])
+end
 
 function inv_nan(A)
     if any(isnan,A)
