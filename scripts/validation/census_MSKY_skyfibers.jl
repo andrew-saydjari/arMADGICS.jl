@@ -93,9 +93,12 @@ for (i, s) in enumerate(sample)
             status_v[i] = "nosky"
             continue
         end
-        skyspec, skyivar, skymsk = h5open(s.path) do fh
-            fh["flux_1d"][:, skyfibIndxs], fh["ivar_1d"][:, skyfibIndxs], fh["mask_1d"][:, skyfibIndxs]
-        end
+        # jldopen, exactly like getSkyRough (HDF5.jl lacks fancy column indexing)
+        fh = jldopen(s.path)
+        skyspec = fh["flux_1d"][:, skyfibIndxs]
+        skyivar = fh["ivar_1d"][:, skyfibIndxs]
+        skymsk = fh["mask_1d"][:, skyfibIndxs]
+        close(fh)
         ncand = length(skyfibIndxs)
         bits = [validate_sky_fiber(view(skyspec, :, j), view(skyivar, :, j), view(skymsk, :, j)) for j in 1:ncand]
         allnan = [(b & SKYFIB_ALLNANZERO_BIT) != 0 for b in bits]
