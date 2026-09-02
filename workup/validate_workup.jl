@@ -69,7 +69,7 @@ function parse_commandline()
         help = "tolerate missing batch files (partial corpus); missing rows are reported, never silently skipped"
         action = :store_true
         "--nworkers"
-        help = "worker processes (resource cap: master + workers <= 4)"
+        help = "worker processes (validation is ceph-I/O-bound; more than ~16 rarely helps)"
         arg_type = Int
         default = 3
         "--max-batches"
@@ -93,7 +93,8 @@ end
 const parg = parse_commandline()
 const t0 = now()
 
-nw = min(parg["nworkers"], 3)  # hard resource cap: <=4 procs total incl. master
+nw = parg["nworkers"]  # no hard cap: the ≤4-proc limit during initial validation was a
+                       # shared-node scheduling constraint of that session, not a code property
 nw > 0 && addprocs(nw; exeflags = "--project=$(Base.active_project())")
 
 const RCPATH = joinpath(@__DIR__, "RowContract.jl")
