@@ -23,26 +23,36 @@ const SKY_MIN_FIBERS = 3
 # per-sky-fiber flag bits (validate_sky_fiber; logged when the guard fires):
 #   2^0 non-finite flux anywhere in the spectrum (any such pixel can poison VLocSkyLines:
 #       the raw spectrum enters the prior unmasked; healthy ar1Dunical fibers are finite
-#       everywhere, with 0 at chip gaps, so this is not over-exclusive)
-#   2^1 flux entirely NaN/zero (the A4 upstream NaN/good-mask shape)
-#   2^2 fewer than SKY_MIN_GOODPIX pixels with good mask, finite flux, finite ivar > 0
-#   2^3 scale = nanzeromedian(flux) non-finite or <= 0 (sky spectra have positive median)
+#       everywhere, with 0 at chip gaps, so this is not over-exclusive)   [EXCLUDES]
+#   2^1 flux entirely NaN/zero (the A4 upstream NaN/good-mask shape)      [EXCLUDES]
+#   2^2 fewer than SKY_MIN_GOODPIX pixels with good mask, finite flux,
+#       finite ivar > 0                                                   [EXCLUDES]
+#   2^3 scale = nanzeromedian(flux) non-positive. RECORDED ONLY, does NOT exclude:
+#       the 2026_05_01 census found ~3% of object exposures (all APO) carry faint sky
+#       fibers with slightly negative medians (background-subtraction noise, full
+#       good-pixel counts) — finite, so not poisonous; excluding them would change
+#       results on those healthy exposures without a poisoning justification. Whether
+#       to exclude them is an AKS decision (they remain subject to the z-cut).
 #   2^4 excluded by the pre-existing scale z-cut (recorded by combine_sky_fibers)
 const SKYFIB_NONFINITE_BIT = 2^0
 const SKYFIB_ALLNANZERO_BIT = 2^1
 const SKYFIB_LOWGOODPIX_BIT = 2^2
-const SKYFIB_BADSCALE_BIT = 2^3
+const SKYFIB_NEGSCALE_BIT = 2^3
 const SKYFIB_ZCUT_BIT = 2^4
+# bits that remove a fiber from the sky construction (2^3 is informational only)
+const SKYFIB_EXCLUDE_BITS = SKYFIB_NONFINITE_BIT | SKYFIB_ALLNANZERO_BIT | SKYFIB_LOWGOODPIX_BIT
 
 # exposure-level skyBit codes (recorded per spectrum in the batch output):
 #   2^0 >= 1 candidate sky fiber excluded by validate_sky_fiber (poison guard fired)
 #   2^1 >= 1 validated sky fiber excluded by the scale z-cut (pre-existing cut, now recorded)
 #   2^2 surviving sky-fiber count < SKY_MIN_FIBERS -> sky-line component skipped (zeros)
 #   2^3 no sky fibers in the fiber configuration at all -> sky-line component skipped
+#   2^4 >= 1 used sky fiber has non-positive median scale (recorded only, fiber kept)
 const SKY_EXCLUDED_FIBER_BIT = 2^0
 const SKY_ZCUT_FIBER_BIT = 2^1
 const SKY_TOO_FEW_FIBERS_BIT = 2^2
 const SKY_NO_FIBERS_BIT = 2^3
+const SKY_NEGSCALE_FIBER_BIT = 2^4
 
 """
     validate_sky_fiber(flux, ivar, msk; min_goodpix=SKY_MIN_GOODPIX)
@@ -63,8 +73,10 @@ function validate_sky_fiber(flux, ivar, msk; min_goodpix::Int=SKY_MIN_GOODPIX)
         bit |= SKYFIB_LOWGOODPIX_BIT
     end
     scale = nanzeromedian(flux)
-    if !(isfinite(scale) && (scale > 0))
-        bit |= SKYFIB_BADSCALE_BIT
+    # non-finite scale only happens when the flux is entirely NaN/zero/Inf, which the
+    # exclusion bits above already catch; a finite non-positive scale is recorded only
+    if isfinite(scale) && (scale <= 0)
+        bit |= SKYFIB_NEGSCALE_BIT
     end
     return bit
 end
@@ -73,8 +85,8 @@ end
     combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers=SKY_MIN_FIBERS)
 
 Build the exposure-level local sky-line prior from candidate sky-fiber spectra
-(columns), excluding fibers flagged by `validate_sky_fiber` and by the pre-existing
-scale z-cut. Returns
+(columns), excluding fibers whose `validate_sky_fiber` flag intersects
+`SKYFIB_EXCLUDE_BITS` and fibers cut by the pre-existing scale z-cut. Returns
 `(nSkyFibers, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit, mskSky, skyFibBits)`.
 
 Guarantees post-guard: `VLocSkyLines` and `meanLocSkyLines` are finite everywhere.
@@ -91,7 +103,7 @@ flagged via `skyBit` — no sky model is invented.
 function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::Int=SKY_MIN_FIBERS)
     npix, ncand = size(skyspec)
     skyFibBits = [validate_sky_fiber(view(skyspec, :, j), view(skyivar, :, j), view(skymsk, :, j)) for j in 1:ncand]
-    mskValid = (skyFibBits .== 0)
+    mskValid = ((skyFibBits .& SKYFIB_EXCLUDE_BITS) .== 0)
 
     # scale z-cut (pre-existing), computed over validated fibers only (identical to the
     # old cut when all fibers validate: nanzero* already filtered NaN/Inf/0 scales)
@@ -117,6 +129,9 @@ function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::In
     end
     if any(mskValid .& .!mskZ)
         skyBit |= SKY_ZCUT_FIBER_BIT
+    end
+    if any(j -> mskSky[j] && ((skyFibBits[j] & SKYFIB_NEGSCALE_BIT) != 0), 1:ncand)
+        skyBit |= SKY_NEGSCALE_FIBER_BIT
     end
 
     if nSkyFibers < min_fibers

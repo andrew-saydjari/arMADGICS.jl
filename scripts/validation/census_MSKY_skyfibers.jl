@@ -71,6 +71,7 @@ expnum_v = [s.expnum for s in sample]
 n_skycand = fill(-1, n)          # candidate sky fibers in the config
 n_allnan = zeros(Int, n)         # A4-shape: all-NaN/zero flux
 n_partial_nonfinite = zeros(Int, n) # non-finite somewhere but not all-NaN
+n_negscale = zeros(Int, n)       # finite non-positive median scale (recorded, kept)
 n_excluded_postguard = zeros(Int, n)
 n_poisoning_preguard = zeros(Int, n) # non-finite fibers that PASS the pre-guard z-cut
 npix_poisoned = zeros(Int, n)        # V pixels poisoned pre-guard (any col non-finite, incremental over healthy)
@@ -105,7 +106,8 @@ for (i, s) in enumerate(sample)
         nonfin = [(b & SKYFIB_NONFINITE_BIT) != 0 for b in bits]
         n_allnan[i] = count(allnan)
         n_partial_nonfinite[i] = count(nonfin .& .!allnan)
-        n_excluded_postguard[i] = count(bits .!= 0)
+        n_excluded_postguard[i] = count((bits .& SKYFIB_EXCLUDE_BITS) .!= 0)
+        n_negscale[i] = count(b -> (b & SKYFIB_NEGSCALE_BIT) != 0, bits)
 
         # pre-guard inclusion: the original z-cut over ALL candidates
         skyScale = dropdims(nanzeromedian(skyspec, 1), dims=1)
@@ -146,6 +148,7 @@ h5open(out_h5, "w") do fh
     fh["n_allnan"] = n_allnan
     fh["n_partial_nonfinite"] = n_partial_nonfinite
     fh["n_excluded_postguard"] = n_excluded_postguard
+    fh["n_negscale"] = n_negscale
     fh["n_poisoning_preguard"] = n_poisoning_preguard
     fh["npix_poisoned"] = npix_poisoned
     fh["npix_poisoned_cheb"] = npix_poisoned_cheb
@@ -175,6 +178,8 @@ function report(sel, label)
     println("  pre-guard poisoned incl. out-of-chebmsk-only:        $poisonedany  frac=$(round(poisonedany/mok, sigdigits=3))")
     println("  >=1 sky fiber excluded post-guard:                   $excl  frac=$(round(excl/mok, sigdigits=3)) +/- $(round(binerr(excl, mok), sigdigits=2))")
     println("  >=1 all-NaN (A4) sky fiber:                          $a4  frac=$(round(a4/mok, sigdigits=3)) +/- $(round(binerr(a4, mok), sigdigits=2))")
+    negsc = count(ok .& (n_negscale .> 0))
+    println("  >=1 negative-median sky fiber (recorded, kept):      $negsc  frac=$(round(negsc/mok, sigdigits=3)) +/- $(round(binerr(negsc, mok), sigdigits=2))")
     println("  low-sky fallback (<$(SKY_MIN_FIBERS) survive):       $lowsky")
     println("  zero sky candidates in config:                       $nosky")
 end

@@ -219,13 +219,13 @@ end
     @test (bit & SKYFIB_NONFINITE_BIT) != 0
     @test (bit & SKYFIB_ALLNANZERO_BIT) != 0
     @test (bit & SKYFIB_LOWGOODPIX_BIT) != 0
-    @test (bit & SKYFIB_BADSCALE_BIT) != 0
+    @test (bit & SKYFIB_EXCLUDE_BITS) != 0
 
     # all-zero flux (finite, but no data)
     bit = validate_sky_fiber(zeros(npix), ivar, msk)
     @test (bit & SKYFIB_ALLNANZERO_BIT) != 0
-    @test (bit & SKYFIB_BADSCALE_BIT) != 0
     @test (bit & SKYFIB_NONFINITE_BIT) == 0
+    @test (bit & SKYFIB_EXCLUDE_BITS) != 0
 
     # too few good pixels (mask, bad ivar both shrink the count)
     msk_few = falses(npix); msk_few[1:(SKY_MIN_GOODPIX-1)] .= true
@@ -233,8 +233,12 @@ end
     ivar_bad = zeros(npix)
     @test (validate_sky_fiber(flux, ivar_bad, msk) & SKYFIB_LOWGOODPIX_BIT) != 0
 
-    # non-positive median flux
-    @test (validate_sky_fiber(fill(-5.0, npix), ivar, msk) & SKYFIB_BADSCALE_BIT) != 0
+    # non-positive (finite) median flux: recorded, but NOT an exclusion bit
+    # (census: ~3% of exposures carry finite faint sky fibers with slightly negative
+    # medians -- harmless, kept, AKS to decide any future exclusion)
+    bit = validate_sky_fiber(fill(-5.0, npix), ivar, msk)
+    @test (bit & SKYFIB_NEGSCALE_BIT) != 0
+    @test (bit & SKYFIB_EXCLUDE_BITS) == 0
 end
 
 @testset "M-SKY: combine_sky_fibers" begin
@@ -294,6 +298,16 @@ end
     @test nSky == nsky - 1
     @test (skyBit & SKY_ZCUT_FIBER_BIT) != 0
     @test (bits[2] & SKYFIB_ZCUT_BIT) != 0
+    @test (skyBit & SKY_EXCLUDED_FIBER_BIT) == 0
+
+    # negative-median (finite) sky fiber within the z-cut: KEPT, recorded in skyBit
+    scales_neg = [-5.0, 10.0, 25.0, 40.0, 55.0, 70.0, 85.0, 100.0]
+    skyspec_n = scales_neg' .+ 0.1 .* randn(rng, npix, nsky)
+    nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(skyspec_n, skyivar, skymsk)
+    @test nSky == nsky # nothing excluded
+    @test all(mskSky)
+    @test (bits[1] & SKYFIB_NEGSCALE_BIT) != 0
+    @test (skyBit & SKY_NEGSCALE_FIBER_BIT) != 0
     @test (skyBit & SKY_EXCLUDED_FIBER_BIT) == 0
 
     # too few surviving fibers: flagged no-op sky component (zeros), never NaN
