@@ -80,6 +80,8 @@ snr_oldform = fill(NaN, nfib)
 snr_newform = fill(NaN, nfib)
 starscale0_v = fill(NaN, nfib)
 ingestBit_v = fill(-999, nfib)
+skyBit_v = fill(-999, nfib)
+nSkyFibers_v = fill(-999, nfib)
 rv_pixoff = fill(NaN, nfib)
 rv_flag = fill(-999, nfib)
 chi2res_v = fill(NaN, nfib)
@@ -118,6 +120,8 @@ for (i, fib) in enumerate(run_fibers)
     snr_pipe[i] = meta[10]
     starscale0_v[i] = meta[2]
     ingestBit_v[i] = length(meta) >= 11 ? meta[11] : -999
+    skyBit_v[i] = length(meta) >= 12 ? meta[12] : -999
+    nSkyFibers_v[i] = Int(meta[9])
     rv = out[2][1]
     rv_pixoff[i] = Float64(rv[1])
     rv_flag[i] = Int(rv[6])
@@ -141,6 +145,8 @@ h5open(out_h5, "w") do fh
     fh["snr_newformula_masked"] = snr_newform
     fh["starscale0"] = starscale0_v
     fh["ingestBit"] = ingestBit_v
+    fh["skyBit"] = skyBit_v
+    fh["nSkyFibers"] = nSkyFibers_v
     fh["RV_pixoff_final"] = rv_pixoff
     fh["RV_flag"] = rv_flag
     fh["chi2res"] = chi2res_v
@@ -153,12 +159,12 @@ h5open(out_h5, "w") do fh
 end
 
 println("\n=== summary (src_dir = $src_dir) ===")
-println(rpad("fib", 5), rpad("note", 34), rpad("status", 7), rpad("snr_pipe", 13), rpad("snr_old_frm", 13), rpad("snr_new_frm", 13), rpad("starscale0", 13), rpad("ingestBit", 10), rpad("RVpix", 10), rpad("apV|max|", 12), "err")
+println(rpad("fib", 5), rpad("note", 34), rpad("status", 7), rpad("snr_pipe", 13), rpad("snr_old_frm", 13), rpad("snr_new_frm", 13), rpad("starscale0", 13), rpad("ingestBit", 10), rpad("skyBit", 8), rpad("nSky", 6), rpad("RVpix", 10), rpad("apV|max|", 12), "err")
 for (i, fib) in enumerate(run_fibers)
     println(rpad(fib, 5), rpad(get(fiber_notes, fib, "sci"), 34), rpad(status[i], 7),
         rpad(round(snr_pipe[i], sigdigits=4), 13), rpad(round(snr_oldform[i], sigdigits=4), 13),
         rpad(round(snr_newform[i], sigdigits=4), 13), rpad(round(starscale0_v[i], sigdigits=4), 13),
-        rpad(ingestBit_v[i], 10), rpad(round(rv_pixoff[i], sigdigits=4), 10),
+        rpad(ingestBit_v[i], 10), rpad(skyBit_v[i], 8), rpad(nSkyFibers_v[i], 6), rpad(round(rv_pixoff[i], sigdigits=4), 10),
         rpad(round(apVisit_absmax[i], sigdigits=4), 12), errmsg[i][1:min(end, 80)])
 end
 println("results written to $out_h5")
@@ -166,7 +172,7 @@ println("results written to $out_h5")
 ## Batch-extraction contract check (post-fix code only): run the multi_spectra_batch
 ## extraction lambdas (kept in sync with pipeline.jl RVextract) over the mixed
 ## success/failure outs to catch shape/type mismatches that would crash a real batch save.
-if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 11
+if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 12
     metai = 1
     RVind, RVchi, RVcom, strpo = 2, 3, 4, 5
     adjfiberindx = 0 # dummy for the contract check
@@ -182,6 +188,7 @@ if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 11
         (x -> x[metai][9], "nSkyFibers"),
         (x -> x[metai][10], "snr"),
         (x -> x[metai][11], "ingestBit"),
+        (x -> x[metai][12], "skyBit"),
         (x -> adjfiberindx, "adjfiberindx"),
         (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
         (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),

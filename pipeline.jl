@@ -342,6 +342,7 @@ end
                 (x -> x[metai][9], "nSkyFibers"),
                 (x -> x[metai][10], "snr"),
                 (x -> x[metai][11], "ingestBit"), # M2: per-spectrum ingest/failure code (bits in src/ingest.jl)
+                (x -> x[metai][12], "skyBit"), # M-SKY: exposure-level sky-prior status (bits in src/ingest.jl)
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),

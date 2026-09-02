@@ -17,6 +17,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
     npix = length(chebmsk_exp)
     nstarcoef = size(V_starlines, 2)
     ingestBit = 0
+    skyBit = 0
     nSkyFibers = 0
     skyscale0 = NaN
     starscale0 = NaN
@@ -29,9 +30,9 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         out = []
 
         # This could/should shift to a per night preprocessing
-        # Get Sky Prior
-        # ingest bit should start here to encode cases with not enough sky
-        nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
+        # Get Sky Prior (M-SKY: guarded against bad sky fibers; skyBit records
+        # exclusions / skipped sky-line component — bit codes in src/ingest.jl)
+        nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
         skyscale0 = nanzeromedian(meanLocSky)
 
         # Get the Exposure (Visit) Spectrum
@@ -54,10 +55,10 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         if ingest_fatal(ingestBit)
             println("Skipping spectrum (ingestBit=$ingestBit) for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx")
             flush(stdout)
-            return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, collect(length.(slvl_tuple)))
+            return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)))
         end
 
-        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr, ingestBit)) # 1
+        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr, ingestBit, skyBit)) # 1
 
         if skyCont_off
             meanLocSky .= 0
@@ -294,7 +295,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         ingestBit |= INGEST_RUNTIME_ERROR_BIT
         println("Error in pipeline_single_spectra for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx (recorded ingestBit=$ingestBit): ", sprint(showerror, e))
         flush(stdout)
-        return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, collect(length.(slvl_tuple)))
+        return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)))
     end
 end
 
@@ -313,22 +314,23 @@ end
 const INGEST_FAIL_RV_FLAG = 2^6
 
 """
-    failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, lvllens)
+    failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens)
 
 Build a placeholder `out` with EXACTLY the same nesting/shapes as a successful
 `pipeline_single_spectra` return, so `extractor`/`multi_spectra_batch` can save
 mixed success/failure batches. All science quantities are NaN (counts 0, masks
 false); the failure reason is carried in the `ingestBit` column (bit codes in
-src/ingest.jl) and `RV_flag` is set to `INGEST_FAIL_RV_FLAG`.
+src/ingest.jl), the sky-prior status in `skyBit`, and `RV_flag` is set to
+`INGEST_FAIL_RV_FLAG`.
 """
-function failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, nstarcoef, lvllens)
+function failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens)
     npix = length(simplemsk)
     out = []
-    # 1: meta block (mirrors the success push, incl. the new ingestBit column)
+    # 1: meta block (mirrors the success push, incl. the ingestBit/skyBit columns)
     push!(out, (count(simplemsk), starscale0, skyscale0,
         nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk),
         count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])),
-        simplemsk, nSkyFibers, snr, ingestBit))
+        simplemsk, nSkyFibers, snr, ingestBit, skyBit))
     # 2: RV block (sampler_1d_hierarchy_var shape)
     lvlouts = [((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG), fill(NaN, n), fill(NaN, n)) for n in lvllens]
     push!(out, ((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG, NaN), lvlouts))
