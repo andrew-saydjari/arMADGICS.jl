@@ -1,0 +1,9 @@
+[deps]
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+MPIPreferences = "3da0fdf6-3ccc-4f1b-acd9-58baa6c99267"
+Preferences = "21216c6a-2e73-6563-6e65-726566657250"
+
+[extras]
+HDF5_jll = "0234f1f7-429e-5d53-9886-15a909be8d59"
+OpenMPI_jll = "fe0851c0-eecd-5654-98d4-656369965a5c"
