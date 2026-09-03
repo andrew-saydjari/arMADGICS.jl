@@ -17,7 +17,8 @@ using Distributed, JLD2, SortFilters, DataFrames
 include("../scripts/prior_build/prior_utils.jl")
 include("../scripts/prior_build/sample_sky_defs.jl")
 isdefined(Main, :gspice) || include("../scripts/prior_build/gspice.jl")
-include("../scripts/prior_build/build_sky_defs.jl")
+# already included by sky_prior_contract.jl when running under runtests.jl
+isdefined(Main, :build_skyCont) || include("../scripts/prior_build/build_sky_defs.jl")
 
 @testset "M4/E5: sample_sky + prior builders smoke (1 fiber x 1 night, apo+lco)" begin
     reduxBase = "/mnt/ceph/users/sdssv/work/asaydjari/2026_05_01/outdir/"
