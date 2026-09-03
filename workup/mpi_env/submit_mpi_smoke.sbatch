@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-REPO=/mnt/home/asaydjari/gitcode/arMADGICS.jl        # adjust if running from a worktree
+REPO=${REPO:-/mnt/home/asaydjari/gitcode/arMADGICS.jl}   # env-overridable; worktree default until PR #26 merges
 SCRATCH=/mnt/ceph/users/sdssv/work/asaydjari/2026_09_02/w2_mpi_smoke/slurm_${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
 
