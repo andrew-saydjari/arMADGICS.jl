@@ -1,0 +1,36 @@
+# Preferences binding this project to the CLUSTER-MODULE MPI + parallel HDF5
+# stack (never the JLL artifacts — mixing them causes ABI clashes at dlopen).
+#
+# Requires before ANY use of this project (see setup_mpi_env.sh):
+#   module load openmpi/5.0.6 hdf5/mpi-1.14.5
+#
+# Version pins recorded 2026-09-02 on ccalin051 (rocky9, modules/2.4-20250724):
+#   openmpi/5.0.6      -> /mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6
+#   hdf5/mpi-1.14.5    -> /mnt/sw/nix/store/mh5b4q8vqxcdcmirjnr18v3r6g4ix8by-hdf5-1.14.5
+#   (matches the stack acasey's Python MPI workup used: openmpi/5.0.6 +
+#    hdf5/mpi-1.14.5 + cephtweaks with CEPHTWEAKS_LAZYIO=1)
+#
+# The [OpenMPI_jll]/[HDF5_jll] sections use the JLLWrappers "<product>_path"
+# preference override so the JLLs dlopen the system libraries instead of
+# their artifacts; [MPIPreferences] makes MPI.jl drive the system mpiexec.
+
+[MPIPreferences]
+__clear__ = ["preloads_env_switch"]
+_format = "1.0"
+abi = "OpenMPI"
+binary = "system"
+cclibs = []
+libmpi = "libmpi"
+mpiexec = "mpiexec"
+preloads = []
+
+[OpenMPI_jll]
+libmpi_path = "/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6/lib/libmpi.so"
+libmpi_mpifh_path = "/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6/lib/libmpi_mpifh.so"
+libmpi_usempi_ignore_tkr_path = "/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6/lib/libmpi_usempi_ignore_tkr.so"
+libmpi_usempif08_path = "/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6/lib/libmpi_usempif08.so"
+mpiexec_path = "/mnt/sw/nix/store/k1aj11vmsmwf411qyp4l57lk9di2x929-openmpi-5.0.6/bin/mpiexec"
+
+[HDF5_jll]
+libhdf5_path = "/mnt/sw/nix/store/mh5b4q8vqxcdcmirjnr18v3r6g4ix8by-hdf5-1.14.5/lib/libhdf5.so"
+libhdf5_hl_path = "/mnt/sw/nix/store/mh5b4q8vqxcdcmirjnr18v3r6g4ix8by-hdf5-1.14.5/lib/libhdf5_hl.so"

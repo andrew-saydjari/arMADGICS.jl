@@ -325,17 +325,20 @@ end
 # ------------------------------------------------------ discovery/reconcile --
 
 """
-    discover_batches(rawdir) -> Dict{BatchId, String}
+    discover_batches(rawdir; fibers=1:NFIBER_MAX) -> Dict{BatchId, String}
 
 Enumerate batch files on disk (one readdir per 3-digit fiber subdirectory —
 bounded, non-recursive). Files that do not match the batch-name pattern are
 ignored. Discovery order is irrelevant by construction: identity comes from
-the parsed filename, never from list position.
+the parsed filename, never from list position. `fibers` restricts discovery
+to fiber subdirectories in that range (for fiber-subset workups; the expected
+set must be restricted identically or reconciliation will flag extras).
 """
-function discover_batches(rawdir::AbstractString)
+function discover_batches(rawdir::AbstractString; fibers::AbstractUnitRange = 1:NFIBER_MAX)
     out = Dict{BatchId, String}()
     for entry in sort(readdir(rawdir))
         occursin(r"^\d{3}$", entry) || continue
+        parse(Int, entry) in fibers || continue
         sub = joinpath(rawdir, entry)
         isdir(sub) || continue
         for fn in readdir(sub)
@@ -474,10 +477,21 @@ every dataset's LAST axis equals the identity-derived batch length, and (when
 `ref_keyinfo` from a reference batch is given) the key set and leading axes
 match. Returns a list of problem strings (empty = clean).
 """
-function check_batch_integrity(path::AbstractString, id::BatchId,
-        fidx::FiberIndex; ref_keyinfo = nothing)
+check_batch_integrity(path::AbstractString, id::BatchId,
+    fidx::FiberIndex; ref_keyinfo = nothing) =
+    check_batch_integrity(path, length(batch_within_range(fidx, id));
+        ref_keyinfo = ref_keyinfo)
+
+"""
+    check_batch_integrity(path, nrow_expect::Int; ref_keyinfo=nothing) -> Vector{String}
+
+Method taking the identity-derived batch length directly (for callers — e.g.
+distributed readers — that carry the expected length rather than the whole
+`FiberIndex`).
+"""
+function check_batch_integrity(path::AbstractString, nrow_expect::Int;
+        ref_keyinfo = nothing)
     problems = String[]
-    nrow_expect = length(batch_within_range(fidx, id))
     local ki
     try
         ki = discover_keys(path)
