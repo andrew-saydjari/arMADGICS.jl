@@ -63,7 +63,11 @@ echo "[run_workup] tier=$TIER rawdir=$RAWDIR outdir=$OUTDIR redux=$REDUX extra: 
 
 # rank sizing: auto (default) via WorkupSerial.auto_ranks, or explicit total
 FIBERS=1:600; _prev=""
-for a in "$@"; do if [ "$_prev" = "--fibers" ] && [[ "$a" =~ ^[0-9]+:[0-9]+$ ]]; then FIBERS=$a; fi; _prev=$a; done
+for a in "$@"; do
+    if [ "$_prev" = "--fibers" ] && [[ "$a" =~ ^[0-9]+:[0-9]+$ ]]; then FIBERS=$a; fi
+    if [[ "$a" =~ ^--fibers=([0-9]+:[0-9]+)$ ]]; then FIBERS=${BASH_REMATCH[1]}; fi
+    _prev=$a
+done
 NNODES=${SLURM_NNODES:-1}
 if [ "${WORKUP_RANKS:-auto}" = "auto" ]; then
     read -r RANKS RANKS_PER_NODE < <(julia --project="$WORKUP_DIR" -e "

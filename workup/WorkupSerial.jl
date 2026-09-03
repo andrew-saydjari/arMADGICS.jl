@@ -72,6 +72,10 @@ function auto_ranks(rawdir::AbstractString; fibers::AbstractUnitRange = 1:RowCon
     mem = slurm && haskey(ENV, "SLURM_MEM_PER_NODE") ? parse(Int, ENV["SLURM_MEM_PER_NODE"]) * 2^20 :
         slurm && haskey(ENV, "SLURM_MEM_PER_CPU") ? parse(Int, ENV["SLURM_MEM_PER_CPU"]) * 2^20 * cpus :
         Int(Sys.free_memory())
+    # --mem=0 requests the WHOLE node, and Slurm then exports SLURM_MEM_PER_NODE=0
+    # (sallocAKS uses --mem=0). Neither Slurm mem var present inside an allocation
+    # means the same thing. Treat both as whole-node memory, not zero.
+    mem <= 0 && (mem = Int(Sys.total_memory()))
     per_node = max(1, min(floor(Int, frac * mem / (inflight * payload)), cpus))
     total = max(1, min(per_node * nnodes, length(disc)))
     return total, cld(total, nnodes)
