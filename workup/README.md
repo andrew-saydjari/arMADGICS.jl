@@ -33,19 +33,63 @@ Environment knobs:
 | var | default | effect |
 |---|---|---|
 | `WORKUP_TIER` | `mpi` | `serial` → run `workup_serial.jl` instead (no modules needed) |
-| `WORKUP_RANKS` | `8` | MPI ranks for single-node `mpiexec` / reader procs for the serial tier |
+| `WORKUP_RANKS` | `auto` | `auto` = size from data + node resources (below); an explicit integer is honored as the TOTAL rank count (the auto arithmetic is still printed for audit) |
+| `WORKUP_MEM_FRACTION` | `0.90` | memory headroom factor in the auto sizing |
+| `WORKUP_SIZING_DRYRUN` | unset | `1` → print the sizing block and exit 0 (audit mode, launches nothing) |
 | `HDF5_USE_FILE_LOCKING` | `FALSE` | forwarded to HDF5 (MPI tier) |
 | `CEPHTWEAKS_LAZYIO` | `1` | ceph lazy I/O (MPI tier) |
+
+### Rank auto-sizing (`WORKUP_RANKS=auto`, the default)
+
+Memory does not pool across nodes, so sizing is per node first:
+
+```
+per_rank_est   = BASE (1500 MB) + INFLIGHT (3) × per_batch_payload_MB
+ranks_per_node = min( floor(WORKUP_MEM_FRACTION × mem_per_node / per_rank_est),
+                      cpus_per_node ),  ≥ 1
+total_ranks    = ranks_per_node × nnodes, capped by the number of batch files, ≥ 1
+```
+
+- `per_batch_payload` comes from a startup size probe (`size_probe.jl`):
+  the same key/shape/dtype discovery RowContract performs, on a sample
+  batch, summed over all keys — fatter future keys automatically shrink
+  the rank count. The probe also counts the batch files in the requested
+  `--fibers` window (the work-unit cap).
+- `BASE` = 1500 MB/rank is the measured runtime baseline (Julia + MPI +
+  parallel HDF5; max RSS 1.45 GB/rank in the 2026-09-02 fiber-2 MPI run,
+  rank 0 carrying the 26.5M-row identity index); `INFLIGHT` = 3 batch
+  payloads per rank (read buffer + write-path copy + slack). Both are
+  env-overridable (`WORKUP_BASE_MB`, `WORKUP_INFLIGHT`) but should not
+  normally be touched.
+- Resources: inside Slurm, `SLURM_MEM_PER_NODE` (or
+  `SLURM_MEM_PER_CPU × cpus/node`), `SLURM_JOB_CPUS_PER_NODE` (minimum
+  entry on heterogeneous allocations — memory heterogeneity is not visible
+  in the environment, so homogeneous memory per node is assumed), and
+  `SLURM_NNODES`. Outside Slurm: `/proc/meminfo` MemAvailable + `nproc`
+  (nnodes = 1).
+- The full arithmetic (per-rank estimate breakdown, per-node resources,
+  the min(), the ×nnodes multiplication, and the work-unit cap) is printed
+  as `[run_workup:sizing]` lines on EVERY run — also when `WORKUP_RANKS`
+  is explicit, so the log always shows what auto would have chosen.
+- Note: current workloads are I/O-bound and per-batch payloads are ~91 MB,
+  so auto typically lands **cpu-capped** (e.g. 32 on ccalin051, where the
+  memory cap would allow ~237). The RAM cap exists to protect future
+  fatter keys / leaner nodes; the mocked-env unit test
+  (`test/test_run_workup_sizing.sh`) covers both regimes plus multi-node.
 
 Launch logic (encapsulated — callers do NOT load modules or pick launchers):
 
 - `WORKUP_TIER=serial` → `julia --project=workup workup_serial.jl ...`
+  (the sized total becomes `--nworkers`)
 - MPI tier: loads `cephtweaks openmpi/5.0.6 hdf5/mpi-1.14.5`, exports the
   ceph env, then
   - multi-node Slurm allocation (`SLURM_JOB_NUM_NODES > 1`) →
-    `srun --mpi=pmix julia --project=workup/mpi_env workup_mpi.jl ...`
+    `srun --mpi=pmix --ntasks=<total> --ntasks-per-node=<ranks/node>
+    julia --project=workup/mpi_env workup_mpi.jl ...` — the explicit
+    `--ntasks-per-node` enforces the sized distribution so ranks land as
+    computed instead of packing onto one node
   - otherwise (ccalin051 or a 1-node allocation) →
-    `mpiexec -np $WORKUP_RANKS julia --project=workup/mpi_env workup_mpi.jl ...`
+    `mpiexec -np <total> julia --project=workup/mpi_env workup_mpi.jl ...`
 - If the modules fail to load (wrong cluster, no Lmod), it exits 3 with a
   message naming the `WORKUP_TIER=serial` fallback. It never silently
   degrades tiers on its own.
@@ -81,6 +125,7 @@ workup/run_workup.sh \
 | file | role |
 |---|---|
 | `run_workup.sh` | THE entrypoint (above) |
+| `size_probe.jl` | data-side inputs for the rank auto-sizing (per-batch payload bytes + batch count) |
 | `RowContract.jl` | W1 identity/row-range/expected-set/integrity logic (shared by everything) |
 | `WorkupSerial.jl` | planning + output preallocation + streaming engine |
 | `workup_serial.jl` | serial-tier CLI: Distributed readers, single writer |
