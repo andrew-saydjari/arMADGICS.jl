@@ -42,10 +42,40 @@ using Dates
 using HDF5
 using Printf
 
-export WorkupPlan, plan_workup, run_workup, out_file_path, out_row_range
+export WorkupPlan, plan_workup, run_workup, out_file_path, out_row_range, auto_ranks
 
 const HDR_PLACEHOLDER = "This is only a header"   # historical workup.jl layout
 const CKPT_NAME = "workup_serial.ckpt"
+
+"""
+    auto_ranks(rawdir; fibers=1:600, frac=0.90, inflight=3) -> (total, per_node)
+
+Rank sizing: per-rank need = per-batch payload (key discovery on a sample
+batch) × the structural `inflight` factor; runtime overhead is absorbed by
+the `frac` headroom (the one tunable, WORKUP_MEM_FRACTION). Per-node first
+(memory does not pool): min(mem cap, cpus/node) from the Slurm allocation
+(min cpus entry when heterogeneous) or this node, × nnodes, capped by the
+batch count.
+"""
+function auto_ranks(rawdir::AbstractString; fibers::AbstractUnitRange = 1:RowContract.NFIBER_MAX,
+        frac::Real = 0.90, inflight::Int = 3)
+    disc = discover_batches(rawdir; fibers = fibers)
+    isempty(disc) && error("auto_ranks: no batch files in fiber window $fibers")
+    payload = sum(prod(v.shape) * sizeof(v.eltype)
+                  for v in values(discover_keys(first(values(disc)))))
+    slurm = haskey(ENV, "SLURM_JOB_ID")
+    nnodes = slurm ? parse(Int, get(ENV, "SLURM_NNODES", "1")) : 1
+    cpus = slurm && haskey(ENV, "SLURM_JOB_CPUS_PER_NODE") ?
+        minimum(parse(Int, m.captures[1]) for m in
+                eachmatch(r"(\d+)(?:\(x\d+\))?", ENV["SLURM_JOB_CPUS_PER_NODE"])) :
+        Sys.CPU_THREADS
+    mem = slurm && haskey(ENV, "SLURM_MEM_PER_NODE") ? parse(Int, ENV["SLURM_MEM_PER_NODE"]) * 2^20 :
+        slurm && haskey(ENV, "SLURM_MEM_PER_CPU") ? parse(Int, ENV["SLURM_MEM_PER_CPU"]) * 2^20 * cpus :
+        Int(Sys.free_memory())
+    per_node = max(1, min(floor(Int, frac * mem / (inflight * payload)), cpus))
+    total = max(1, min(per_node * nnodes, length(disc)))
+    return total, cld(total, nnodes)
+end
 
 # ------------------------------------------------------------------- planning
 

@@ -177,6 +177,22 @@ end
     end
 end
 
+@testset "auto_ranks sizing" begin
+    mktempdir() do dir
+        synth_corpus(dir)   # 6 batches, tiny payload → never mem-capped here
+        t, p = withenv(() -> auto_ranks(dir), "SLURM_JOB_ID" => nothing)
+        @test (t, p) == (min(6, Sys.CPU_THREADS), min(6, Sys.CPU_THREADS))
+        # mocked 2-node Slurm: 4 cpus/node → 8 raw, work-unit-capped to 6 (3/node)
+        t, p = withenv(() -> auto_ranks(dir), "SLURM_JOB_ID" => "1", "SLURM_NNODES" => "2",
+            "SLURM_JOB_CPUS_PER_NODE" => "4(x2)", "SLURM_MEM_PER_NODE" => "64000")
+        @test (t, p) == (6, 3)
+        # mem-capped to the 1-rank floor; heterogeneous cpus spec exercises the min
+        t, p = withenv(() -> auto_ranks(dir), "SLURM_JOB_ID" => "1", "SLURM_NNODES" => "1",
+            "SLURM_JOB_CPUS_PER_NODE" => "16,2", "SLURM_MEM_PER_NODE" => "0")
+        @test (t, p) == (1, 1)
+    end
+end
+
 @testset "workup_serial: distributed readers produce identical output" begin
     mktempdir() do dir
         fli, fidx = synth_corpus(dir)
