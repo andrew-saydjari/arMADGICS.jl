@@ -22,7 +22,10 @@ if "SLURM_NTASKS" in keys(ENV)
     using SlurmClusterManager
     addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
 else
-    addprocs(30, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+    # Worker count override (ARM_STARCONT_NWORKERS); default 20 = dedicated-node
+    # (ccalin051) etiquette cap. Slurm path above is unaffected.
+    addprocs(parse(Int, get(ENV, "ARM_STARCONT_NWORKERS", "20")),
+        exeflags = ["--project=$proj_path"])
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker allocation took $dt"); t_then = t_now; flush(stdout);
@@ -87,20 +90,27 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     prior_dict["fracTellSamples_APO"] = prior_dir*"2026_04_25/outsamptell_apo.jdat" # last made 2023_04_03 by AKS
     prior_dict["fracTellSamples_LCO"] = prior_dir*"2026_04_26/outsamptell_lco.jdat" # last made 2023_04_07 by AKS
 
-    # Location of the Tfun samples (secured copy of acasey's delivered 20260220-arjl-domeflats
-    # products; the original /mnt/home/acasey/scratch/ path is DEAD).
-    # FUTURE (card E3): once the bug-fixed telluric transfer-function refit products exist
-    # (T_out=T_init rerun bug fixed, 20260323.py:314-321), point tell_base at the new dated
-    # tfun directory. Override without editing this file via the ARM_TFUN_BASE env var, e.g.
-    #   ARM_TFUN_BASE=/mnt/ceph/users/sdssv/work/asaydjari/<E3_date>/tfun_refit/ julia --project=. ...
-    # (expects <tell_base>/20260323_{apo,lco}.h5-shaped files; update the filenames below if
-    # the E3 rerun renames them).
+    # Tfun samples: E3 bug-fixed telluric transfer-function refit products
+    # (T_out=T_init rerun bug fixed; see 2026_09_02/telluric_refit_full/). Override the
+    # directory without editing this file via ARM_TFUN_BASE (expects
+    # <tell_base>/tellurics_refit_20260902_{apo,lco}.h5) or each file via
+    # ARM_TFUN_{APO,LCO}. The pre-E3 delivered products (secured copies of acasey's
+    # 20260220-arjl-domeflats 20260323_{apo,lco}.h5) live in
+    # <prior_inputs_dir>tellurics_20260220_arjl_domeflats/ if a rollback is needed.
     tell_base = get(ENV, "ARM_TFUN_BASE",
-        prior_inputs_dir*"tellurics_20260220_arjl_domeflats/")
-    prior_dict["tfun_samples_APO"] = tell_base*"20260323_apo.h5"
-    prior_dict["tfun_samples_LCO"] = tell_base*"20260323_lco.h5"
-    prior_dict["tfun_sample_lst_APO"] = prior_dir*"2026_04_25/20260323_apo_tfunlist.jdat"
-    prior_dict["tfun_sample_lst_LCO"] = prior_dir*"2026_04_25/20260323_lco_tfunlist.jdat"
+        prior_dir*"2026_09_02/telluric_refit_full/out/")
+    prior_dict["tfun_samples_APO"] = get(ENV, "ARM_TFUN_APO", tell_base*"tellurics_refit_20260902_apo.h5")
+    prior_dict["tfun_samples_LCO"] = get(ENV, "ARM_TFUN_LCO", tell_base*"tellurics_refit_20260902_lco.h5")
+    # Usable-(fiber,exposure) lists REBUILT against the E3 artifacts (row indices differ
+    # from the delivered files!) with the 2026-09-03 consumption cuts: medflux>400
+    # (2026_04_25-era convention), APO medflux<=10,000 bright cut, chi_sq_fiber<=p99.9
+    # per telescope. Build script + BUILD_REPORT.txt sit next to the lists.
+    # Override via ARM_TFUN_LIST_BASE or ARM_TFUN_LIST_{APO,LCO}. The old delivered-file
+    # lists (2026_04_25/20260323_{apo,lco}_tfunlist.jdat) do NOT apply to the E3 files.
+    tfun_list_base = get(ENV, "ARM_TFUN_LIST_BASE",
+        prior_dir*"2026_09_03/tfunlists_refit20260902/")
+    prior_dict["tfun_sample_lst_APO"] = get(ENV, "ARM_TFUN_LIST_APO", tfun_list_base*"20260902_apo_tfunlist.jdat")
+    prior_dict["tfun_sample_lst_LCO"] = get(ENV, "ARM_TFUN_LIST_LCO", tfun_list_base*"20260902_lco_tfunlist.jdat")
 end
 
 @everywhere begin
