@@ -1,6 +1,6 @@
 # arMADGICS <img src="docs/src/assets/logo.png" alt="MADGICS Logo" width="100" align="right"/>
 
-[![Build Status](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Build Status](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI_lite.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/arMADGICS.jl/actions/workflows/CI_lite.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/andrew-saydjari/arMADGICS.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/andrew-saydjari/arMADGICS.jl)
 
 
