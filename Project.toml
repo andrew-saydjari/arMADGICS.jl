@@ -1,7 +1,7 @@
 name = "arMADGICS"
 uuid = "3883ed4c-82a0-4091-a108-0ec9373ee70d"
-authors = ["andrew-saydjari"]
 version = "0.0.1"
+authors = ["andrew-saydjari"]
 
 [deps]
 ApogeeReduction = "54a60710-c70b-4ca7-b418-a99a7825ced3"
@@ -43,13 +43,14 @@ Suppressor = "fd094767-a336-5f1f-9728-57cf17d0bbfb"
 ThreadPinning = "811555cd-349b-4f26-b7bc-1f208b848042"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
-[sources]
-ApogeeReduction = {rev = "main", url = "https://github.com/andrew-saydjari/ApogeeReduction.jl.git"}
+[sources.ApogeeReduction]
+rev = "main"
+url = "https://github.com/andrew-saydjari/ApogeeReduction.jl.git"
 
 [compat]
 ArgParse = "1"
 AstroTime = "0.7"
-BLISBLAS = "0.1"
+BLISBLAS = "0.1, 0.2"
 BasisFunctions = "0.6, 0.7"
 DataFrames = "1"
 Distributions = "0.25"
