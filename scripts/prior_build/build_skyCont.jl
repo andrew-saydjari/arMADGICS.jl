@@ -129,5 +129,6 @@ end
 end
 
 # observing, it spent a most of the time before entering the multithreaded SVD. Why?
-BLAS.set_num_threads(ENV["SLURM_NTASKS"]); build_skyCont(runlist_range)
+# M4: ENV values are Strings; BLAS.set_num_threads needs an Int (fall back to CPU count off-SLURM)
+BLAS.set_num_threads(parse(Int, get(ENV, "SLURM_NTASKS", string(Sys.CPU_THREADS)))); build_skyCont(runlist_range)
 # @showprogress pmap(build_skyCont,1:600)

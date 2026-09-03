@@ -103,6 +103,12 @@ end
 
         fnameFaintGSPICE = "sky_priors/APOGEE_skyline_faint_GSPICE_svd_"*string(nsub_bright)*"_f"*lpad(adjfibindx,3,"0")*".h5"
 
+        # M4: fnameBright/fnameBrightGSPICE were referenced but never defined (UndefVarError);
+        # bright priors are not currently produced (see comment below), so these names only
+        # gate the outer checkpoint check
+        fnameBright = "sky_priors/APOGEE_skyline_bright_svd_"*string(nsub_bright)*"_f"*lpad(adjfibindx,3,"0")*".h5"
+        fnameBrightGSPICE = "sky_priors/APOGEE_skyline_bright_GSPICE_svd_"*string(nsub_bright)*"_f"*lpad(adjfibindx,3,"0")*".h5"
+
         if !(isfile(fnameBright) & isfile(fnameBrightGSPICE) & isfile(fnameFaint) & isfile(fnameFaintGSPICE))
             savename = prior_dict["skyline"]*lpad(adjfibindx,3,"0")*".jdat"
             skyline = deserialize(savename)
@@ -198,5 +204,7 @@ end
 end
 
 # it spends most of its time on a simple matmul ????
-BLAS.set_num_threads(ENV["SLURM_NTASKS"]); build_skyLines(runlist_range)
+mkpath("sky_priors") # h5write does not create the output directory
+# M4: ENV values are Strings; BLAS.set_num_threads needs an Int (fall back to CPU count off-SLURM)
+BLAS.set_num_threads(parse(Int, get(ENV, "SLURM_NTASKS", string(Sys.CPU_THREADS)))); build_skyLines(runlist_range)
 # @showprogress pmap(build_skyLines,1:600)
