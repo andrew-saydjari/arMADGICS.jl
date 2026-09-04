@@ -3,10 +3,12 @@
 # driver documents behavior BEFORE and AFTER the M1/M2/M3 fixes.
 #
 # Usage:
-#   julia --project=<env> scripts/validation/run_M123_fixture.jl <src_dir> <fixture_dir> <out_h5>
+#   julia --project=<env> scripts/validation/run_M123_fixture.jl <src_dir> <fixture_dir> <out_h5> [starCont_h5]
 # where <src_dir> is the arMADGICS checkout whose src/ should be exercised
 # (allows running the pre-fix and post-fix code with the identical driver),
 # <fixture_dir> is the fixture reduxBase, and <out_h5> collects the results.
+# Optional 4th arg swaps the starContinuum prior (E6 prior-swap regression);
+# default is the production 2025_07_31 rough prior.
 #
 # Priors (read-only): the production 2025_07_31 set from pipeline.jl.
 # Almanac (read-only): the 2026_05_01 run's allobs file.
@@ -48,7 +50,9 @@ logUniWaveAPOGEE = 10 .^ range((start = 4.179 - 125 * 6.0e-6), step=6.0e-6, leng
 
 prior_dict = Dict{String,String}()
 prior_dict["chebmsk"] = prior_dir * "2025_07_31/prior_dump/chebmsk_exp.h5"
-prior_dict["starCont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
+prior_dict["starCont"] = length(ARGS) >= 4 ? abspath(ARGS[4]) :
+    prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
+println("starCont prior: ", prior_dict["starCont"])
 prior_dict["starLines_refLSF"] = prior_dir * "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5"
 
 ## load priors exactly as multi_spectra_batch does
@@ -156,6 +160,7 @@ h5open(out_h5, "w") do fh
     fh["errmsg"] = errmsg
     attrs(fh)["src_dir"] = src_dir
     attrs(fh)["fixture_dir"] = fixture_dir
+    attrs(fh)["starCont_prior"] = prior_dict["starCont"]
 end
 
 println("\n=== summary (src_dir = $src_dir) ===")
