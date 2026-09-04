@@ -7,9 +7,13 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-Pkg.update("ApogeeReduction");
-Pkg.instantiate();
-Pkg.precompile();
+# ARM_SKIP_PKG_OPS: skip the Pkg mutation/instantiate step (e.g. local E6-style
+# regression builds against an already-instantiated env). Default: run them.
+if !haskey(ENV, "ARM_SKIP_PKG_OPS")
+    Pkg.update("ApogeeReduction");
+    Pkg.instantiate();
+    Pkg.precompile();
+end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt"); t_then = t_now; flush(stdout);
@@ -21,7 +25,8 @@ if "SLURM_NTASKS" in keys(ENV)
     using SlurmClusterManager
     addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
 else
-    addprocs(30, exeflags = ["--project=$proj_path"]) # change to a workers per node variable
+    # ARM_STARCONT_NWORKERS: local worker count (default 30, historical)
+    addprocs(parse(Int, get(ENV, "ARM_STARCONT_NWORKERS", "30")), exeflags = ["--project=$proj_path"])
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker allocation took $dt"); t_then = t_now; flush(stdout);
@@ -71,9 +76,26 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     # Prior Dictionary
     prior_dict = Dict{String,String}()
 
-    # StarCont Samples
-    prior_dict["starcont"] = prior_dir*"2026_04_26/tell_prior_disk/starCont_"
-    prior_dict["StarContChipGapMsk"] = prior_dir*"2026_04_25/StarContChipGapMsk.h5"
+    # StarCont Samples. Env overrides (all optional, defaults = historical paths):
+    #   ARM_STARCONT_SAMPLES    - sample-file prefix (…/starCont_), e.g. the E4
+    #                             2026_09_03 tell_prior_disk generation
+    #   ARM_STARCONT_CHIPGAPMSK - chip-gap mask h5 (keys apo/lco)
+    #   ARM_STARCONT_OUTDIR     - output dir for the built per-fiber h5 priors
+    prior_dict["starcont"] = get(ENV, "ARM_STARCONT_SAMPLES",
+        prior_dir*"2026_04_26/tell_prior_disk/starCont_")
+    prior_dict["StarContChipGapMsk"] = get(ENV, "ARM_STARCONT_CHIPGAPMSK",
+        prior_dir*"2026_04_25/StarContChipGapMsk.h5")
+    out_dir = get(ENV, "ARM_STARCONT_OUTDIR", "star_priors")
+
+    # ARM_STARCONT_FIBERS: comma list and/or a:b ranges (e.g. "101,245,295,335,350").
+    # Default 1:600 (historical full build).
+    build_fibers = if haskey(ENV, "ARM_STARCONT_FIBERS")
+        sort(unique(reduce(vcat, [occursin(":", tok) ?
+            collect(parse(Int, split(tok, ":")[1]):parse(Int, split(tok, ":")[2])) :
+            [parse(Int, tok)] for tok in split(ENV["ARM_STARCONT_FIBERS"], ",")])))
+    else
+        collect(1:600)
+    end
 end
 
 @everywhere begin
@@ -83,7 +105,7 @@ end
 
 @everywhere begin    
     function build_starCont(adjfibindx)
-        savename = "star_priors/APOGEE_starcont_svd_"*string(nsub)*"_f"*lpad(adjfibindx,3,"0")*".h5"
+        savename = joinpath(out_dir, "APOGEE_starcont_svd_"*string(nsub)*"_f"*lpad(adjfibindx,3,"0")*".h5")
         mkpath(dirname(savename))
         if !isfile(savename)
             starcontfname = prior_dict["starcont"]*lpad(adjfibindx,3,"0")*".jdat"
@@ -124,4 +146,4 @@ end
 end
 
 # build_starCont(runlist_range)
-@showprogress pmap(build_starCont,1:600)
+@showprogress pmap(build_starCont,build_fibers)
