@@ -7,9 +7,15 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-Pkg.update("ApogeeReduction");
-Pkg.instantiate();
-Pkg.precompile();
+# ARM_SKIP_PKG_OPS=1 skips update/instantiate/precompile for reproducible reruns
+# against an already-resolved Manifest (mirrors build_starCont.jl; E4b: Pkg.update
+# would move the ApogeeReduction repo-rev=main pin and break bit-comparability
+# with the 2026_09_03 E4 corpus).
+if get(ENV, "ARM_SKIP_PKG_OPS", "0") != "1"
+    Pkg.update("ApogeeReduction");
+    Pkg.instantiate();
+    Pkg.precompile();
+end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt"); t_then = t_now; flush(stdout);
@@ -213,4 +219,11 @@ end
 end
 
 # gen_starCont_samples(runlist_range,loc_parallel=true)
-@showprogress pmap(gen_starCont_samples,1:600)
+# ARM_STARCONT_RANGE="a:b" restricts the adjusted-fiber range (default 1:600).
+# E4b uses 301:600 to regenerate ONLY the LCO half against the C2_LCO=3000 tfunlist.
+run_range = let s = get(ENV, "ARM_STARCONT_RANGE", "1:600")
+    lo, hi = parse.(Int, split(s, ":"))
+    lo:hi
+end
+println("sampling adjusted-fiber range: $run_range"); flush(stdout)
+@showprogress pmap(gen_starCont_samples, run_range)
