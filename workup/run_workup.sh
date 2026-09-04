@@ -57,6 +57,18 @@ MPI_ENV=$WORKUP_DIR/mpi_env
 TIER=${WORKUP_TIER:-mpi}
 
 [ -d "$RAWDIR" ] || { echo "run_workup.sh: rawdir not found: $RAWDIR" >&2; exit 2; }
+
+# Empty-night guard (first production night 2026-09-04, lco 61286 cal-only):
+# the madgics pipeline writes batch_info.txt with "Total batches: 0" when a
+# night has no object exposures. Nothing to work up is SUCCESS, matching the
+# madgics-workup step's graceful "No batches found ... Exiting" — without
+# this, auto_ranks hard-errors ("no batch files in fiber window") and fails
+# the nightly chain on every calibration-only night.
+if [ -f "$RAWDIR/batch_info.txt" ] \
+        && grep -qE '^# Total batches: 0$' "$RAWDIR/batch_info.txt"; then
+    echo "[run_workup] 0 batches in $RAWDIR (cal-only/empty night) — nothing to do"
+    exit 0
+fi
 export WORKUP_REDUX=$REDUX
 
 echo "[run_workup] tier=$TIER rawdir=$RAWDIR outdir=$OUTDIR redux=$REDUX extra: $*"
