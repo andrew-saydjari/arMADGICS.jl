@@ -441,3 +441,44 @@ function e5_assemble_pooled(adjfib, list_dir, src_dir, sample_dir;
     end
     return length(ord)
 end
+
+## --- E5 concurrent-build coordination (on-node ccalin051 run + AKS sbatch job) ---
+
+"The three output files build_skyCont/build_skyLines produce for one fiber."
+function e5_built_outputs(built_dir, adjfib)
+    n = lpad(adjfib, 3, "0")
+    return [joinpath(built_dir, "APOGEE_skycont_svd_30_f$n.h5"),
+        joinpath(built_dir, "APOGEE_skyline_faint_svd_120_f$n.h5"),
+        joinpath(built_dir, "APOGEE_skyline_faint_GSPICE_svd_120_f$n.h5")]
+end
+
+e5_built_done(built_dir, adjfib) = all(isfile, e5_built_outputs(built_dir, adjfib))
+
+"""
+    e5_claim_fiber(built_dir, adjfib) -> Bool
+
+Atomic per-fiber build claim so the on-node run and the Slurm job never
+double-build: mkdir(<built_dir>/.claims/NNN) is atomic on POSIX/ceph — exactly
+one claimant wins. The winner records host/pid/epoch in .claims/NNN/owner.
+Claims are advisory dibs: a fiber counts as DONE only when its three outputs
+exist (e5_built_done). If a run dies mid-fiber its claim goes stale and blocks
+rebuild — release stale claims with scripts/prior_build/e5_release_claims.sh
+(only for hosts with no live build) before resubmitting.
+"""
+function e5_claim_fiber(built_dir, adjfib)
+    cdir = joinpath(built_dir, ".claims")
+    mkpath(cdir)
+    mine = joinpath(cdir, lpad(adjfib, 3, "0"))
+    try
+        mkdir(mine)
+    catch
+        return false
+    end
+    try
+        open(joinpath(mine, "owner"), "w") do io
+            println(io, gethostname(), " pid=", getpid(), " t=", time())
+        end
+    catch
+    end
+    return true
+end

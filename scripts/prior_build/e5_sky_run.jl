@@ -205,29 +205,44 @@ elseif stage == "decompose"
 
 elseif stage == "build"
     mkpath(built_dir)
+    # E5 concurrent-build safety: skip-if-built + atomic per-fiber claims so the
+    # on-node ccalin051 run and the AKS sbatch job can overlap without ever
+    # double-building. E5_BUILD_ORDER=desc makes the two runs approach from
+    # opposite ends (on-node asc, sbatch desc).
+    build_order = get(ENV, "E5_BUILD_ORDER", "asc")
+    fibers_build = build_order == "desc" ? reverse(fibers) : fibers
     res = @showprogress pmap(adjfib -> begin
         r = Dict{Symbol,Any}(:adjfib => adjfib)
-        try
-            t1 = time()
-            build_skyCont(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
-                out_dir=built_dir, nsub=30)
-            r[:cont_s] = round(time() - t1, digits=1)
-            t1 = time()
-            build_skyLines(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
-                out_dir=built_dir) # GSPICE knobs untouched: usamp_factor=7 etc. defaults
-            r[:lines_s] = round(time() - t1, digits=1)
-            r[:status] = :ok
-        catch err
-            r[:status] = :error
-            r[:err] = sprint(showerror, err)[1:min(end, 2000)]
-            println("BUILD ERROR fiber $adjfib (STOP-AND-REPORT per hold-until-crash policy): $(r[:err])"); flush(stdout)
+        if e5_built_done(built_dir, adjfib)
+            r[:status] = :done_already
+        elseif !e5_claim_fiber(built_dir, adjfib)
+            r[:status] = :claimed_elsewhere
+        else
+            try
+                t1 = time()
+                build_skyCont(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
+                    out_dir=built_dir, nsub=30)
+                r[:cont_s] = round(time() - t1, digits=1)
+                t1 = time()
+                build_skyLines(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
+                    out_dir=built_dir) # GSPICE knobs untouched: usamp_factor=7 etc. defaults
+                r[:lines_s] = round(time() - t1, digits=1)
+                r[:status] = :ok
+            catch err
+                r[:status] = :error
+                r[:err] = sprint(showerror, err)[1:min(end, 2000)]
+                println("BUILD ERROR fiber $adjfib (STOP-AND-REPORT per hold-until-crash policy): $(r[:err])"); flush(stdout)
+            end
         end
         r
-    end, fibers)
+    end, fibers_build)
     nok = count(r -> r[:status] == :ok, res)
-    println("build: ok=$nok error=$(length(res) - nok)")
+    ndone = count(r -> r[:status] == :done_already, res)
+    nclaimed = count(r -> r[:status] == :claimed_elsewhere, res)
+    nerr = count(r -> r[:status] == :error, res)
+    println("build: ok=$nok done_already=$ndone claimed_elsewhere=$nclaimed error=$nerr")
     for r in res
-        if r[:status] != :ok
+        if r[:status] == :error
             println("  CRASHED fiber $(r[:adjfib]): $(r[:err])")
         end
     end
