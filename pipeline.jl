@@ -87,6 +87,7 @@ flush(stdout);
     include(joinpath(src_dir, "src/gridSearch.jl"))
     include(joinpath(src_dir, "src/componentAndPosteriors.jl"))
     include(joinpath(src_dir, "src/fileNameHandling.jl"))
+    include(joinpath(src_dir, "src/priors.jl"))
     include(joinpath(src_dir, "src/ingest.jl"))
     include(joinpath(src_dir, "src/lowRankPrescription.jl"))
     include(joinpath(src_dir, "src/marginalizeEW.jl"))
@@ -126,21 +127,8 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
     reduxBase = parg["redux_base"]
     almanacFile = parg["almanac_file"]
 
-    # Prior Dictionary
-    prior_dict = Dict{String,String}()
-
-    # Sky Priors
-    prior_dict["skycont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_skycont_svd_30_f"
-    prior_dict["skyLines_bright"] = prior_dir * "2025_07_31/prior_dump/sky_priors/APOGEE_skyline_bright_GSPICE_svd_120_f"
-    prior_dict["skyLines_faint"] = prior_dir * "2025_07_31/prior_dump/sky_priors/APOGEE_skyline_faint_GSPICE_svd_120_f"
-
-    # Star Priors
-    # prior_dict["starCont"] = prior_dir*"2024_02_21/apMADGICS.jl/src/prior_build/star_priors/APOGEE_starcont_svd_60_f"
-    prior_dict["chebmsk"] = prior_dir * "2025_07_31/prior_dump/chebmsk_exp.h5"
-    prior_dict["starCont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
-    prior_dict["starLines_refLSF"] = prior_dir * "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5"
-    # prior_dict["starLines_LSF"] = prior_dir*"2024_03_16/arMADGICS.jl/src/prior_build/starLine_priors_norm94_dd/APOGEE_starCor_svd_50_subpix_f" # DD Version
-    # prior_dict["starLines_LSF"] = prior_dir*"2024_02_21/arMADGICS.jl/src/prior_build/starLine_priors_norm94/APOGEE_stellar_kry_50_subpix_f" # TH Version
+    # Prior Dictionary (path construction + ARM_* env overrides live in src/priors.jl)
+    prior_dict = build_prior_dict(prior_dir)
 
     # # DIB Priors
     # dib_waves = [15273, 15672]
@@ -236,80 +224,16 @@ end
         # if check_file(savename, mode = checkpoint_mode)
         if !isfile(savename)
             # We are loading the priors EVERY time, so there is no benefit to ordering
-            # This is not optimal, but reduces scope confusion
-            # These first two could be globals, but load them here for consistency
-            # V_dib_noLSF_soft_lst = []
-            # for dib in dib_waves
-            #     local f = h5open(prior_dict["DIB_noLSF_soft_$(dib)"])
-            #     push!(V_dib_noLSF_soft_lst, read(f["Vmat"]))
-            #     close(f)
-            # end
-
-            f = h5open(prior_dict["starLines_refLSF"])
-            V_starlines_refLSF = read(f["Vmat"])
-            close(f)
-
-            ### Need to load the priors here
-            # f = h5open(prior_dict["skycont"]*lpad(adjfiberindx ,3,"0")*".h5")
-            # V_skycont = read(f["Vmat"])
-            # chebmsk_exp = convert.(Bool,read(f["chebmsk_exp"]))
-            # close(f)
-
-            # f = h5open(prior_dict["skyLines_bright"]*lpad(adjfiberindx ,3,"0")*".h5")
-            # V_skyline_bright = read(f["Vmat"])
-            # submsk_bright = convert.(Bool,read(f["submsk"]))
-            # close(f)
-
-            # f = h5open(prior_dict["skyLines_faint"]*lpad(adjfiberindx ,3,"0")*".h5")
-            # V_skyline_faint = read(f["Vmat"])
-            # submsk_faint = convert.(Bool,read(f["submsk"]))
-            # close(f)
-
-            # skymsk_bright = chebmsk_exp .& submsk_bright #
-            # skymsk_faint = chebmsk_exp .& submsk_faint
-            # # global skymsk = chebmsk_exp .& (submsk_bright .| submsk_faint)
-            # skymsk = chebmsk_exp .& submsk_faint # completely masking all bright lines b/c detector response is nonlinear;
-
-            f = h5open(prior_dict["chebmsk"])
-            chebmsk_exp = read(f["chebmsk_exp"])
-            close(f)
-            skymsk_bright = chebmsk_exp #.& submsk_bright #
-            skymsk_faint = chebmsk_exp #.& submsk_faint
-            skymsk = chebmsk_exp #.& submsk_faint # completely masking all bright lines b/c detector response is nonlinear;
-
-            # f = h5open(prior_dict["starCont"]*lpad(adjfiberindx ,3,"0")*".h5")
-            f = h5open(prior_dict["starCont"])
-            V_starcont = read(f["Vmat"])
-            close(f)
-
-            V_starlines = V_starlines_refLSF #hack
-            # f = h5open(prior_dict["starLines_LSF"]*lpad(adjfiberindx ,3,"0")*".h5")
-            # V_starlines = read(f["Vmat"])
-            if ddstaronly
-                V_starlines_refLSF = V_starlines
-                msk_starCor = convert.(Bool, read(f["msk_starCor"]))
-            else
-                msk_starCor = ones(Bool, length(chebmsk_exp))
-            end
-            # close(f)
-
-            # V_dib_lst = []
-            # for dib in dib_waves
-            #     local f = h5open(prior_dict["DIB_LSF_$(dib)"]*lpad(adjfiberindx ,3,"0")*".h5")
-            #     push!(V_dib_lst,read(f["Vmat"]))
-            #     close(f)
-            # end
-
-            # V_dib_soft_lst = []
-            # for dib in dib_waves
-            #     local f = h5open(prior_dict["DIB_LSF_soft_$(dib)"]*lpad(adjfiberindx ,3,"0")*".h5")
-            #     push!(V_dib_soft_lst,read(f["Vmat"]))
-            #     close(f)
-            # end
+            # This is not optimal, but reduces scope confusion.
+            # Per-fiber prior loading (incl. the ddstaronly guard) lives in
+            # src/priors.jl::load_fiber_priors, shared with the fixture driver.
+            # TODO(E7): V_starlines is still the reference-LSF TH prior for all fibers
+            # (the pipeline.jl:285-era "#hack"); branch run/E7-starlines-perfiber
+            # delivers the per-fiber TH-with-new-LSF starLines set and a follow-up
+            # commit repoints this inside load_fiber_priors (DD per-fiber -> pass-2).
 
             ### Single spectrum loop
-            # prior_vec = (V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF,V_starlines,msk_starCor,V_dib_lst, V_dib_soft_lst,V_dib_noLSF_soft_lst)
-            prior_vec = (chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor)
+            prior_vec = load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=ddstaronly)
             pipeline_single_spectra_bind(argtup) = pipeline_single_spectra(argtup, prior_vec; ddstaronly=ddstaronly)
             for (ind, indval) in enumerate(indsubset)
                 push!(out, pipeline_single_spectra_bind(indval))
