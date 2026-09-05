@@ -193,9 +193,12 @@ function e5_extract_pack(reduxBase, almanacFile, tele, mjd, expnum; pack_dir)
     h5open(tmpname, "w") do fh
         fh["flux"] = skyspec
         fh["ivar"] = skyivar
-        fh["msk"] = Bool.(skymsk) # strict, as in the merged sampler's zeros(Bool) assignment
+        # strict Bool conversion (as in the merged sampler's zeros(Bool) assignment),
+        # materialized as Array: JLD2/broadcast hand back BitArray, which HDF5.jl
+        # cannot write (MethodError: strides)
+        fh["msk"] = Matrix{Bool}(skymsk)
         fh["fiberindx"] = skyfibIndxs
-        fh["mskSky"] = convert.(Bool, mskSky)
+        fh["mskSky"] = Vector{Bool}(mskSky)
         fh["skyFibBits"] = Int.(skyFibBits)
         fh["scale"] = convert.(Float64, scales)
         attrs(fh)["skyBit"] = skyBit
