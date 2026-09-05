@@ -25,10 +25,15 @@
 # Author - Andrew Saydjari (E5 pass 1)
 
 using HDF5, Statistics, StatsBase, Printf, Dates
-using CairoMakie, ColorSchemes
-black_latexfonts = merge(theme_black(), theme_latexfonts())
-set_theme!(black_latexfonts)
-CairoMakie.disable_mime!("svg", "pdf", "text/html")
+# figures need CairoMakie (separate plots project); E5_SKIP_FIGS=1 runs the
+# threshold design + decisions only (rerun later with figs for the report)
+const SKIP_FIGS = get(ENV, "E5_SKIP_FIGS", "0") == "1"
+if !SKIP_FIGS
+    using CairoMakie, ColorSchemes
+    black_latexfonts = merge(theme_black(), theme_latexfonts())
+    set_theme!(black_latexfonts)
+    CairoMakie.disable_mime!("svg", "pdf", "text/html")
+end
 
 e5_out = get(ENV, "E5_OUT", "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_04/prior_outputs/sky_pass1")
 screen_dir = joinpath(e5_out, "screens")
@@ -85,6 +90,7 @@ h5open(joinpath(screen_dir, "e5_screen_decisions.h5"), "w") do fh
     attrs(fh)["CHI2FULL_MAX"] = CHI2FULL_MAX
     attrs(fh)["definition"] = "bit1: robust z of log10(scale) within source fiber > SCALE_ZMAX; bit2: chi2r_cont > CHI2CONT_MAX or chi2r_full > CHI2FULL_MAX (vs per-fiber median normalized spectrum)"
     for f in fibs
+        global ndrop, ndrop_bright, ndrop_chi2
         st = per_fib[f]
         n = length(st.scale)
         drop = zeros(UInt8, n)
@@ -124,6 +130,7 @@ end
 println("dropped $ndrop of $ntot ($(round(100ndrop/ntot, digits=3))%) — report at $(joinpath(screen_dir, "e5_screen_report.txt"))")
 
 ## design figures
+if !SKIP_FIGS
 begin
     fig = Figure(size=(1500, 500))
     ax1 = Axis(fig[1, 1], xlabel="robust z of log10(scale)", ylabel="count",
@@ -159,4 +166,5 @@ begin
     vlines!(ax, [300.5], color=:orange, linewidth=1)
     save(joinpath(plot_dir, "fig_screens_perfiber.png"), fig, px_per_unit=2)
 end
-println("figures -> $plot_dir")
+end # !SKIP_FIGS
+println(SKIP_FIGS ? "figures SKIPPED (E5_SKIP_FIGS=1)" : "figures -> $plot_dir")
