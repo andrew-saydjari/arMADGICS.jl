@@ -48,17 +48,22 @@ end
 # contract tests against the real prior store (skipped off-cluster)
 prior_dir_real = "/mnt/ceph/users/sdssv/work/asaydjari/"
 pd_real = build_prior_dict(prior_dir_real)
-if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5")
+if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5") &&
+   isfile(pd_real["skycont"] * "085.h5") && isfile(pd_real["skyLines_faint"] * "085.h5")
     @testset "priors: load_fiber_priors contract (real files)" begin
         pv = load_fiber_priors(pd_real, 85)
+        @test length(pv) == 10
         chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont,
-        V_starlines_refLSF, V_starlines, msk_starCor = pv[1:8]
+        V_starlines_refLSF, V_starlines, msk_starCor, V_skycont, V_skyline_faint = pv
         npix = 8700
         @test length(chebmsk_exp) == npix
         @test eltype(chebmsk_exp) == Bool
         @test size(V_starcont) == (npix, 60)
         @test all(isfinite, V_starcont)
-        # prior support obeys its own chip-gap mask: rows outside are identically zero
+        @test size(V_skycont) == (npix, 30)
+        @test all(isfinite, V_skycont)
+        @test size(V_skyline_faint) == (npix, 120)
+        @test all(isfinite, V_skyline_faint)
         @test size(V_starlines_refLSF, 1) == npix
         @test V_starlines === V_starlines_refLSF # E7 not yet wired (TODO tracked)
         @test length(msk_starCor) == npix && all(msk_starCor)
@@ -67,6 +72,7 @@ if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5")
             @test eltype(m) == Bool && length(m) == npix
             @test all(m .<= chebmsk_exp)
         end
+        @test skymsk == skymsk_faint # bright lines fully masked (no bright submask)
         # adjfiberindx range guard + telescope routing (lco file may not exist here;
         # routing is exercised via the error message path name)
         @test_throws ErrorException load_fiber_priors(pd_real, 0)

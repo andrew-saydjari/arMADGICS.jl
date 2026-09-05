@@ -9,6 +9,8 @@
 #                           default <prior_dir>/2026_09_05/prior_outputs/starCont_pass1c
 #                           (pass-1c = AKS-approved final cut-policy regeneration,
 #                           supersedes pass1b; identical schema)
+#   ARM_SKY_PRIOR_DIR       E5 per-fiber sky priors (audit items 2/4)
+#                           default <prior_dir>/2026_09_04/prior_outputs/sky_pass1/built
 
 """
     build_prior_dict(prior_dir)
@@ -27,6 +29,18 @@ function build_prior_dict(prior_dir)
         joinpath(prior_dir, "2026_09_05/prior_outputs/starCont_pass1c"))
     prior_dict["starCont_apo"] = joinpath(starcont_root, "built_apo", "APOGEE_starcont_svd_60_f")
     prior_dict["starCont_lco"] = joinpath(starcont_root, "built_lco", "APOGEE_starcont_svd_60_f")
+
+    # Sky priors (audit items 2/4): E5 per-fiber skycont + faint GSPICE skyline
+    # priors. E5-output-contract notes: (i) no bright skyline priors are produced
+    # ("not making bright priors for now, unrecoverable" — build_sky_defs.jl) and no
+    # submsk_bright; bright-line pixels are excluded via the faint file's submsk,
+    # exactly the DR17 consumption (skymsk = chebmsk & submsk_faint). (ii) the E5
+    # skycont files carry no chebmsk_exp dataset (unlike DR17-era files); the
+    # chip-gap mask is a separate input.
+    sky_root = get(ENV, "ARM_SKY_PRIOR_DIR",
+        joinpath(prior_dir, "2026_09_04/prior_outputs/sky_pass1/built"))
+    prior_dict["skycont"] = joinpath(sky_root, "APOGEE_skycont_svd_30_f")
+    prior_dict["skyLines_faint"] = joinpath(sky_root, "APOGEE_skyline_faint_GSPICE_svd_120_f")
 
     # Chip-gap/cheb mask: still the single global 2025 file (audit item 3 lands in a
     # later commit of this branch; kept here so the swap is isolated per stage)
@@ -61,7 +75,19 @@ Load all per-fiber priors for one adjusted fiber index (1-300 apo, 301-600 lco) 
 return the `prior_vec` tuple consumed by `pipeline_single_spectra`:
 
     (chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont,
-     V_starlines_refLSF, V_starlines, msk_starCor)
+     V_starlines_refLSF, V_starlines, msk_starCor, V_skycont, V_skyline_faint)
+
+Masking layout (DR17 consumption pattern, apMADGICS pipeline.jl):
+- `submsk_faint` (from the E5 faint GSPICE skyline file) encodes
+  obs>=min_obscnt & chipgap & faint-line-region; `skymsk = chebmsk_exp & submsk_faint`
+  is the solve mask (bright sky lines excluded — nonlinear detector response).
+  KNOWN E5 CALIBRATION GAP (2026-09-05, reported): the DR17-era bright/faint
+  threshold is preserved in DR17 flux units and currently flags zero pixels in
+  ar1Dunical units, so submsk == chip-gap mask until E5 recalibrates; the wiring
+  here consumes submsk unchanged so a rebuild flows through.
+- `skymsk_bright` is retained in the tuple for layout stability but equals
+  `chebmsk_exp` (no per-fiber bright submask exists; the bright component is
+  neither modeled nor exported).
 
 `ddstaronly=true` is refused loudly: the per-fiber DD starLines priors are an E7/
 pass-2 deliverable (on pre-integration main this flag silently read `msk_starCor`
@@ -103,12 +129,21 @@ function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
         read(f["Vmat"])
     end
 
-    # sky masks: E5 per-fiber submasks land in the sky-wiring commit of this branch;
-    # until then this preserves main's behavior (no submask)
-    skymsk_bright = chebmsk_exp
-    skymsk_faint = chebmsk_exp
-    skymsk = chebmsk_exp
+    # E5 per-fiber sky priors (audit items 2/4)
+    fname = per_fiber_prior_file(prior_dict["skycont"], adjfiberindx)
+    V_skycont = h5open(fname) do f
+        read(f["Vmat"])
+    end
+    fname = per_fiber_prior_file(prior_dict["skyLines_faint"], adjfiberindx)
+    V_skyline_faint, submsk_faint = h5open(fname) do f
+        read(f["Vmat"]), convert.(Bool, read(f["submsk"]))
+    end
+
+    skymsk_bright = chebmsk_exp # no bright submask exists (see docstring)
+    skymsk_faint = chebmsk_exp .& submsk_faint
+    # completely masking all bright lines b/c detector response is nonlinear
+    skymsk = chebmsk_exp .& submsk_faint
 
     return (chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont,
-        V_starlines_refLSF, V_starlines, msk_starCor)
+        V_starlines_refLSF, V_starlines, msk_starCor, V_skycont, V_skyline_faint)
 end

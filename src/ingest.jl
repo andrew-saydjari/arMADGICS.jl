@@ -53,6 +53,9 @@ const SKY_ZCUT_FIBER_BIT = 2^1
 const SKY_TOO_FEW_FIBERS_BIT = 2^2
 const SKY_NO_FIBERS_BIT = 2^3
 const SKY_NEGSCALE_FIBER_BIT = 2^4
+#   2^5 >= 1 validated sky fiber produced a non-finite prior-based continuum
+#       decomposition and was dropped from the sky construction (getSky4visit)
+const SKY_NONFINITE_DECOMP_BIT = 2^5
 
 """
     validate_sky_fiber(flux, ivar, msk; min_goodpix=SKY_MIN_GOODPIX)
@@ -82,25 +85,14 @@ function validate_sky_fiber(flux, ivar, msk; min_goodpix::Int=SKY_MIN_GOODPIX)
 end
 
 """
-    combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers=SKY_MIN_FIBERS)
+    select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10)
 
-Build the exposure-level local sky-line prior from candidate sky-fiber spectra
-(columns), excluding fibers whose `validate_sky_fiber` flag intersects
-`SKYFIB_EXCLUDE_BITS` and fibers cut by the pre-existing scale z-cut. Returns
-`(nSkyFibers, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit, mskSky, skyFibBits)`.
-
-Guarantees post-guard: `VLocSkyLines` and `meanLocSkyLines` are finite everywhere.
-Pixels where every surviving sky fiber is NaN/zero (chip gaps, globally masked pixels)
-would give a NaN mean/prior column; they are zeroed AND removed via
-`msk_local_skyLines` (these pixels carry no sky information). On a healthy exposure
-those pixels are already excluded from every solve by the chip-gap/fiber masks, so
-the healthy-path outputs are bit-identical to the pre-guard code.
-
-If fewer than `min_fibers` fibers survive, the sky-line component is skipped:
-mean = zeros and V = a single zero column (exactly a no-op in the Woodbury solves),
-flagged via `skyBit` — no sky model is invented.
+The M-SKY guard chain, extracted verbatim from `combine_sky_fibers` so the
+prior-based sky path (`getSky4visit`) applies the IDENTICAL fiber selection:
+`validate_sky_fiber` exclude bits + the pre-existing scale z-cut. Returns
+`(mskSky, nSkyFibers, skyBit, skyFibBits)`.
 """
-function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::Int=SKY_MIN_FIBERS)
+function select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10)
     npix, ncand = size(skyspec)
     skyFibBits = [validate_sky_fiber(view(skyspec, :, j), view(skyivar, :, j), view(skymsk, :, j)) for j in 1:ncand]
     mskValid = ((skyFibBits .& SKYFIB_EXCLUDE_BITS) .== 0)
@@ -133,6 +125,32 @@ function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::In
     if any(j -> mskSky[j] && ((skyFibBits[j] & SKYFIB_NEGSCALE_BIT) != 0), 1:ncand)
         skyBit |= SKY_NEGSCALE_FIBER_BIT
     end
+    return mskSky, nSkyFibers, skyBit, skyFibBits
+end
+
+"""
+    combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers=SKY_MIN_FIBERS)
+
+Build the exposure-level local sky-line prior from candidate sky-fiber spectra
+(columns), excluding fibers whose `validate_sky_fiber` flag intersects
+`SKYFIB_EXCLUDE_BITS` and fibers cut by the pre-existing scale z-cut (the guard
+chain lives in `select_sky_fibers`). Returns
+`(nSkyFibers, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit, mskSky, skyFibBits)`.
+
+Guarantees post-guard: `VLocSkyLines` and `meanLocSkyLines` are finite everywhere.
+Pixels where every surviving sky fiber is NaN/zero (chip gaps, globally masked pixels)
+would give a NaN mean/prior column; they are zeroed AND removed via
+`msk_local_skyLines` (these pixels carry no sky information). On a healthy exposure
+those pixels are already excluded from every solve by the chip-gap/fiber masks, so
+the healthy-path outputs are bit-identical to the pre-guard code.
+
+If fewer than `min_fibers` fibers survive, the sky-line component is skipped:
+mean = zeros and V = a single zero column (exactly a no-op in the Woodbury solves),
+flagged via `skyBit` — no sky model is invented.
+"""
+function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::Int=SKY_MIN_FIBERS)
+    npix, ncand = size(skyspec)
+    mskSky, nSkyFibers, skyBit, skyFibBits = select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=skyZcut)
 
     if nSkyFibers < min_fibers
         skyBit |= SKY_TOO_FEW_FIBERS_BIT
@@ -148,14 +166,19 @@ function combine_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, min_fibers::In
     return nSkyFibers, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit, mskSky, skyFibBits
 end
 
-function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5, fibindxoi=nothing)
-    # hacks
+# sky-fiber discovery from the almanac fiber-target dictionary (shared by the
+# exposure-empirical path getSkyRough and the prior-based path getSky4visit)
+function get_sky_fiber_indices(almanacFile, tele, mjd, expnum)
     f = h5open(almanacFile)
     fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
-
     fibtypelist = map(x -> fibtargDict[x], 1:300)
-    skyfibIndxs = findall(map(x->x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
+    return findall(map(x -> x[1:3] == "sky", fibtypelist)) # allows for skyB fibers
+end
+
+function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_obs_thresh=5, fibindxoi=nothing)
+    # hacks
+    skyfibIndxs = get_sky_fiber_indices(almanacFile, tele, mjd, expnum)
 
     if !isnothing(fibindxoi)
         if (length(skyfibIndxs) == 0)
@@ -202,6 +225,120 @@ function getSkyRough(reduxBase, tele, mjd, expnum, almanacFile; skyZcut=10, sky_
     # msk_local_skyLines = dropdims(sum(.!isnanorzero.(skyspec[:, mskSky]), dims=2), dims=2) .> sky_obs_thresh
     meanLocSky = zero(meanLocSkyLines) # hack and ignores VLocSky
     return nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit
+end
+
+"""
+    sky_obs_count_mask(outLines, sky_obs_thresh)
+
+DR17 local-sky-line coverage mask (apMADGICS getSky4visit): a pixel is usable for
+the empirical sky-line prior only if MORE THAN `sky_obs_thresh` surviving sky
+fibers contributed a non-NaN/nonzero line residual there (audit item 10: this
+obs-count threshold was silently weakened to "any coverage" in getSkyRough).
+"""
+sky_obs_count_mask(outLines, sky_obs_thresh) =
+    dropdims(sum(.!isnanorzero.(outLines), dims=2), dims=2) .> sky_obs_thresh
+
+"""
+    getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyline_faint, V_skycont;
+                 skyZcut=10, sky_obs_thresh=5, min_fibers=SKY_MIN_FIBERS)
+
+Prior-based per-exposure sky construction — the arM equivalent of DR17 apMADGICS
+`getSky4visit` (the runtime replacement for `getSkyRough`, which remains for the
+E5 sampler paths). For each guard-surviving sky fiber on the exposure, the sky
+spectrum is decomposed into continuum + lines USING THE TARGET FIBER's per-fiber
+E5 priors (`V_skycont`, `V_skyline_faint`; masked to `skymsk` = chebmsk &
+submsk_faint); the continuum components form (`meanLocSky`, `VLocSky`) and the
+line residuals form (`meanLocSkyLines`, `VLocSkyLines`), both consumed by the
+Woodbury solves. Differences from DR17, both deliberate:
+- fiber selection reuses the M-SKY guard chain (`select_sky_fibers`: validate +
+  raw-scale z-cut) BEFORE decomposition (DR17 z-cut the decomposed continuum
+  scales after; same intent, and keeps guard verdicts identical to getSkyRough/E5);
+- no mirror-fiber exclusion (audit item 9: targets are sci/tel only in arM runlists).
+
+Restores the DR17 obs-count threshold (audit item 10) via `sky_obs_count_mask`.
+
+Returns `(nSkyFibers, meanLocSky, VLocSky, meanLocSkyLines, VLocSkyLines,
+msk_local_skyLines, skyBit)`. On a skipped sky construction (no/too-few fibers)
+all components are exact no-ops (zeros; single zero columns) and `skyBit` is set.
+"""
+function getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyline_faint, V_skycont;
+        skyZcut=10, sky_obs_thresh=5, min_fibers::Int=SKY_MIN_FIBERS)
+    npix = length(logUniWaveAPOGEE)
+    # skipped-sky no-op return (mirrors the M-SKY guarded skip in getSkyRough)
+    skyskip = skyBit -> (0, zeros(npix), zeros(npix, 1), zeros(npix), zeros(npix, 1), ones(Bool, npix), skyBit)
+
+    skyfibIndxs = get_sky_fiber_indices(almanacFile, tele, mjd, expnum)
+    if length(skyfibIndxs) == 0
+        return skyskip(SKY_NO_FIBERS_BIT | SKY_TOO_FEW_FIBERS_BIT)
+    end
+
+    ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
+    f = jldopen(ar1Dfname)
+    skyspec = f["flux_1d"][:, skyfibIndxs]
+    skyivar = f["ivar_1d"][:, skyfibIndxs]
+    skymskmat = f["mask_1d"][:, skyfibIndxs]
+    close(f)
+
+    # identical guard chain to getSkyRough/combine_sky_fibers (M-SKY)
+    mskSky, nSkyFibers, skyBit, skyFibBits = select_sky_fibers(skyspec, skyivar, skymskmat; skyZcut=skyZcut)
+    if skyBit != 0
+        flagged = [(skyfibIndxs[j], skyFibBits[j]) for j in findall(skyFibBits .!= 0)]
+        println("getSky4visit: sky guard flagged tele=$tele, mjd=$mjd, expnum=$expnum: skyBit=$skyBit, (fiberindx, skyFibBit)=$flagged")
+        flush(stdout)
+    end
+    if nSkyFibers < min_fibers
+        return skyskip(skyBit | SKY_TOO_FEW_FIBERS_BIT)
+    end
+
+    # decompose each surviving sky fiber with the TARGET fiber's priors (DR17 pattern:
+    # continuum component from the low-rank solve; line residual on covered pixels)
+    cont_cols = Vector{Float64}[]
+    lines_cols = Vector{Float64}[]
+    for j in findall(mskSky)
+        fvec = skyspec[:, j]
+        fivar = skyivar[:, j]
+        covmsk = Bool.(skymskmat[:, j]) .& isfinite.(fvec) .& isfinite.(fivar) .& (fivar .> 0)
+        contvec = sky_decomp(fvec, 1 ./ fivar, covmsk .& skymsk, V_skyline_faint, V_skycont)
+        if !all(isfinite, contvec)
+            # hardening beyond DR17: a non-finite decomposition would poison every
+            # solve on the exposure — drop the fiber and record it
+            skyBit |= SKY_NONFINITE_DECOMP_BIT
+            println("getSky4visit: non-finite sky decomposition dropped fiberindx=$(skyfibIndxs[j]) (tele=$tele, mjd=$mjd, expnum=$expnum)")
+            flush(stdout)
+            continue
+        end
+        lines = zeros(npix)
+        lines[covmsk] .= (fvec.-contvec)[covmsk]
+        push!(cont_cols, contvec)
+        push!(lines_cols, lines)
+    end
+    nSkyFibers = length(cont_cols)
+    if nSkyFibers < min_fibers
+        return skyskip(skyBit | SKY_TOO_FEW_FIBERS_BIT)
+    end
+    outcont = reduce(hcat, cont_cols)
+    outLines = reduce(hcat, lines_cols)
+
+    # DR17 obs-count threshold restored (audit item 10)
+    msk_local_skyLines = sky_obs_count_mask(outLines, sky_obs_thresh)
+
+    meanLocSky = dropdims(nanzeromean(outcont, 2), dims=2)
+    meanLocSkyLines = dropdims(nanzeromean(outLines, 2), dims=2)
+    VLocSky = (outcont .- meanLocSky) ./ sqrt(nSkyFibers)
+    VLocSkyLines = (outLines .- meanLocSkyLines) ./ sqrt(nSkyFibers)
+
+    # M-SKY finiteness hardening (mirrors combine_sky_fibers): pixels with no sky
+    # information (NaN means) are zeroed AND excluded via msk_local_skyLines
+    msk_local_skyLines .&= isfinite.(meanLocSkyLines)
+    meanLocSkyLines[.!msk_local_skyLines] .= 0
+    VLocSkyLines[.!msk_local_skyLines, :] .= 0
+    # continuum decompositions are finite by construction here (guarded above), but a
+    # nanzeromean over all-zero rows (e.g. chip gaps outside every covmsk) gives NaN
+    mskContFinite = isfinite.(meanLocSky)
+    meanLocSky[.!mskContFinite] .= 0
+    VLocSky[.!mskContFinite, :] .= 0
+
+    return nSkyFibers, meanLocSky, VLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit
 end
 
 ## M2/M3 ingest guards
@@ -323,7 +460,11 @@ function get_telemjd_runlist_from_almanac(
     return run_lst
 end
 
-function sky_decomp(outvec, outvar, simplemsk, V_skyline_bright, V_skyline_faint, V_skycont)
+# DR17 sky continuum/line separation for one sky-fiber spectrum, against the target
+# fiber's priors. Signature differs from apMADGICS: no V_skyline_bright argument —
+# E5 produces no bright skyline priors (bright pixels are excluded via submsk_faint
+# inside `skymsk` instead, exactly as bright pixels were excluded from DR17 solves).
+function sky_decomp(outvec, outvar, simplemsk, V_skyline_faint, V_skycont)
     ## Select data for use (might want to handle mean more generally)
     Xd_obs = outvec[simplemsk]
 
@@ -332,15 +473,13 @@ function sky_decomp(outvec, outvar, simplemsk, V_skyline_bright, V_skyline_faint
     Ainv = Diagonal(1 ./ outvar[simplemsk])
 
     ## Set up priors
-    V_skyline_bright_c = V_skyline_bright
-    V_skyline_bright_r = V_skyline_bright_c[simplemsk, :]
     V_skyline_faint_c = V_skyline_faint
     V_skyline_faint_r = V_skyline_faint_c[simplemsk, :]
     V_skycont_c = V_skycont
     V_skycont_r = V_skycont_c[simplemsk, :]
 
     # Compute sky line/continuum separation
-    Vcomb = hcat(V_skyline_bright_r, V_skyline_faint_r, V_skycont_r)
+    Vcomb = hcat(V_skyline_faint_r, V_skycont_r)
     Ctotinv = LowRankMultMat([Ainv, Vcomb], wood_precomp_mult, wood_fxn_mult)
     x_comp_lst = deblend_components_all_asym(Ctotinv, Xd_obs, (V_skycont_r,), (V_skycont_c,))
 
