@@ -73,6 +73,14 @@ if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5") &&
             @test all(m .<= chebmsk_exp)
         end
         @test skymsk == skymsk_faint # bright lines fully masked (no bright submask)
+        # per-telescope mask switch (audit item 3): runtime chebmsk is the 2026_04_25
+        # per-telescope mask (apo 7742 / lco 7833), not the 2025 global (7783)
+        apo_msk, lco_msk = h5open(pd_real["chebmsk"]) do f
+            convert.(Bool, read(f["apo"])), convert.(Bool, read(f["lco"]))
+        end
+        @test chebmsk_exp == apo_msk
+        @test count(apo_msk) == 7742 && count(lco_msk) == 7833
+        @test apo_msk != lco_msk
         # adjfiberindx range guard + telescope routing (lco file may not exist here;
         # routing is exercised via the error message path name)
         @test_throws ErrorException load_fiber_priors(pd_real, 0)

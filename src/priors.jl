@@ -11,6 +11,8 @@
 #                           supersedes pass1b; identical schema)
 #   ARM_SKY_PRIOR_DIR       E5 per-fiber sky priors (audit items 2/4)
 #                           default <prior_dir>/2026_09_04/prior_outputs/sky_pass1/built
+#   ARM_CHIPGAP_MSK         per-telescope chip-gap/cheb mask file (audit item 3)
+#                           default <prior_dir>/2026_04_25/StarContChipGapMsk.h5
 
 """
     build_prior_dict(prior_dir)
@@ -42,9 +44,17 @@ function build_prior_dict(prior_dir)
     prior_dict["skycont"] = joinpath(sky_root, "APOGEE_skycont_svd_30_f")
     prior_dict["skyLines_faint"] = joinpath(sky_root, "APOGEE_skyline_faint_GSPICE_svd_120_f")
 
-    # Chip-gap/cheb mask: still the single global 2025 file (audit item 3 lands in a
-    # later commit of this branch; kept here so the swap is isolated per stage)
-    prior_dict["chebmsk"] = joinpath(prior_dir, "2025_07_31/prior_dump/chebmsk_exp.h5")
+    # Chip-gap/cheb mask (audit item 3): per-telescope 2026_04_25 masks (apo 7742 /
+    # lco 7833 good px) — the same file every E4/E5 prior build trained against, so
+    # runtime and priors are mask-consistent. Replaces the single 2025 global mask
+    # (7783 px), which MASK_PROVENANCE.md (task #30, 2026_09_05/mask_revisit/) shows
+    # descends from LCO FIBER 150's chip coverage applied to both telescopes; with
+    # per-fiber priors wired, 102 APO pixels of that mask would be fit with NO
+    # starCont prior support. The trace verified the 2026_04_25 masks are
+    # bit-reproducible from current corpora and their excluded edge pixels are dead
+    # in current data (live-fiber fraction 0.000).
+    prior_dict["chebmsk"] = get(ENV, "ARM_CHIPGAP_MSK",
+        joinpath(prior_dir, "2026_04_25/StarContChipGapMsk.h5"))
 
     # Reference-LSF TH starLines prior (E7 will add the per-fiber starLines set;
     # the refLSF file remains the restframe-export basis even after E7)
@@ -103,10 +113,10 @@ function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
     (1 <= adjfiberindx <= 600) || error("adjfiberindx=$adjfiberindx outside 1:600")
     tele_key = adjfiberindx > 300 ? "lco" : "apo"
 
-    # global chip-gap/cheb mask (per-telescope switch is audit item 3, later commit)
-    f = h5open(prior_dict["chebmsk"])
-    chebmsk_exp = convert.(Bool, read(f["chebmsk_exp"]))
-    close(f)
+    # per-telescope chip-gap/cheb mask (audit item 3)
+    chebmsk_exp = h5open(prior_dict["chebmsk"]) do f
+        convert.(Bool, read(f[tele_key]))
+    end
 
     # starLines: reference-LSF TH prior for all fibers.
     # TODO(E7): replace with the per-fiber TH-with-new-LSF priors once branch
@@ -120,14 +130,19 @@ function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
     V_starlines = V_starlines_refLSF # E7 pending (see TODO above)
     msk_starCor = ones(Bool, length(chebmsk_exp))
 
-    # starCont (audit item 1): per-fiber pass-1b prior (files carry Vmat, λv,
-    # chipgapmsk — NOT the old rough file's cont_msk / the DR17 chebmsk_exp; the
-    # chipgapmsk dataset becomes a runtime consistency check when the per-telescope
-    # mask switch lands)
+    # starCont (audit item 1): per-fiber pass-1 prior (files carry Vmat, λv,
+    # chipgapmsk — NOT the old rough file's cont_msk / the DR17 chebmsk_exp). The
+    # stored chipgapmsk must equal the runtime per-telescope mask: the build trained
+    # against the same file, so a mismatch means mixed prior/mask generations.
     fname = per_fiber_prior_file(prior_dict["starCont_"*tele_key], adjfiberindx)
-    V_starcont = h5open(fname) do f
-        read(f["Vmat"])
+    V_starcont, starcont_chipgapmsk = h5open(fname) do f
+        read(f["Vmat"]), convert.(Bool, read(f["chipgapmsk"]))
     end
+    starcont_chipgapmsk == chebmsk_exp || error("starCont prior chipgapmsk in $fname " *
+        "does not match the runtime per-telescope chebmsk " *
+        "($(count(starcont_chipgapmsk)) vs $(count(chebmsk_exp)) good px): prior " *
+        "generation and runtime mask are inconsistent (check ARM_CHIPGAP_MSK / " *
+        "ARM_STARCONT_PRIOR_DIR).")
 
     # E5 per-fiber sky priors (audit items 2/4)
     fname = per_fiber_prior_file(prior_dict["skycont"], adjfiberindx)
