@@ -5,8 +5,11 @@
 @testset "priors: build_prior_dict paths + env overrides" begin
     prior_dir_tst = "/tmp/arm_prior_root/"
 
-    # defaults (no overrides): pass-1b starCont layout, split by telescope
-    for k in ("ARM_STARCONT_PRIOR_DIR",)
+    # defaults (no overrides): pass-1c starCont layout, split by telescope.
+    # Save/restore any caller-set override rather than clobbering it (the real-file
+    # tests below honor the caller's environment).
+    saved = Dict(k => get(ENV, k, nothing) for k in ("ARM_STARCONT_PRIOR_DIR",))
+    for k in keys(saved)
         delete!(ENV, k)
     end
     pd = build_prior_dict(prior_dir_tst)
@@ -22,6 +25,9 @@
     pd2 = build_prior_dict(prior_dir_tst)
     @test pd2["starCont_apo"] == "/tmp/arm_alt_starcont/built_apo/APOGEE_starcont_svd_60_f"
     delete!(ENV, "ARM_STARCONT_PRIOR_DIR")
+    for (k, v) in saved
+        isnothing(v) || (ENV[k] = v)
+    end
 
     # per-fiber path completion + loud failure on a missing file
     @test_throws ErrorException per_fiber_prior_file("/tmp/arm_definitely_missing/pfx_f", 85)
