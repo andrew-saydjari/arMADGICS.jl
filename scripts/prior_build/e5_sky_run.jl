@@ -57,7 +57,6 @@ src_dir = joinpath(e5_out, "src_samples")
 sample_dir = joinpath(e5_out, sample_subdir)
 screen_dir = joinpath(e5_out, "screens")
 built_dir = joinpath(e5_out, unscreened ? "built_unscreened" : "built")
-view_path = joinpath(e5_out, "almanac_view_testbed_dr21.h5")
 for d in (e5_out, list_dir, screen_dir)
     mkpath(d)
 end
@@ -109,11 +108,9 @@ println("branch=$git_branch commit=$git_commit clean=$git_clean"); flush(stdout)
 @passobj 1 workers() sample_dir
 @passobj 1 workers() screen_dir
 @passobj 1 workers() built_dir
-@passobj 1 workers() view_path
 
 if stage == "lists"
-    e5_almanac_view(almanacFile, view_path)
-    counts = e5_make_pooled_lists(view_path, list_dir)
+    counts = e5_make_pooled_lists(almanacFile, list_dir)
     println("pooled candidate counts: min=$(minimum(counts)) med=$(median(counts)) max=$(maximum(counts))")
     for adjfib in (1, 30, 31, 76, 226, 300, 301, 388, 519, 600)
         offset = adjfib > 300 ? 300 : 0
@@ -125,7 +122,7 @@ elseif stage == "packs"
     println("unique exposures: $(length(expo))"); flush(stdout)
     res = @showprogress pmap(x -> begin
         try
-            e5_extract_pack(reduxBase, view_path, x[1], x[2], x[3]; pack_dir=pack_dir)
+            e5_extract_pack(reduxBase, almanacFile, x[1], x[2], x[3]; pack_dir=pack_dir)
         catch err
             println("PACK ERROR $(x): $err"); flush(stdout)
             :error
@@ -196,7 +193,7 @@ elseif stage == "decompose"
     @passobj 1 workers() prior_dict
     res = @showprogress pmap(adjfib -> begin
         try
-            get_sky_samples((adjfib, []); reduxBase=reduxBase, almanacFile=view_path,
+            get_sky_samples((adjfib, []); reduxBase=reduxBase, almanacFile=almanacFile,
                 prior_dict=prior_dict, out_dir=sample_dir, loc_parallel=false)
             (adjfib, :ok)
         catch err

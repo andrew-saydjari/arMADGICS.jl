@@ -62,50 +62,28 @@ function e5_pool_range(fiberindx::Int; wind::Int=E5_WIND)
 end
 
 """
-    e5_almanac_view(almanacFile, view_path)
-
-The DR21 testbed almanac stores telescopes under a `raw/` root, but the merged
-readers (read_almanac_exp_df, get_fibTargDict) index `f["<tele>/<mjd>/..."]` and
-require tele == "apo"/"lco" exactly. Write a tiny HDF5 "view" file whose
-root-level apo/lco are external links into the real file's raw/apo, raw/lco.
-Returns view_path (created only if missing).
-"""
-function e5_almanac_view(almanacFile::String, view_path::String)
-    if !isfile(view_path)
-        h5open(view_path, "w") do f
-            for tele in ("apo", "lco")
-                HDF5.create_external(f, tele, almanacFile, "raw/" * tele)
-            end
-        end
-    end
-    # sanity: both links resolve
-    h5open(view_path, "r") do f
-        for tele in ("apo", "lco")
-            haskey(f, tele) || error("e5_almanac_view: link $tele missing in $view_path")
-        end
-    end
-    return view_path
-end
-
-"""
-    e5_collect_sky_runlist(almanacViewFile; runlist_parallel=true)
+    e5_collect_sky_runlist(almanacFile; runlist_parallel=true)
 
 All exact-fiber sky entries in the corpus: vcat of the merged
 get_telemjd_runlist_from_almanac(accepted_fibtypes=["sky"]) over every
-(tele, mjd) in the almanac view. Entries are the merged NamedTuples
-(tele, mjd, expnum, adjfiberindx, sdss_id).
+(tele, mjd) in the almanac. The DR21 almanac stores telescopes under a `raw/`
+root, which the installed ApogeeReduction readers (read_almanac_exp_df,
+get_fibTargDict) expect natively — the file is passed straight through.
+Entries are the merged NamedTuples (tele, mjd, expnum, adjfiberindx, sdss_id).
 """
-function e5_collect_sky_runlist(almanacViewFile; runlist_parallel=true)
+function e5_collect_sky_runlist(almanacFile; runlist_parallel=true)
     tele_mjd_pairs = Tuple{String,String}[]
-    h5open(almanacViewFile, "r") do f
+    h5open(almanacFile, "r") do f
+        root = haskey(f, "raw") ? f["raw"] : f
         for tele in ("apo", "lco")
-            for mjd in keys(f[tele])
+            haskey(root, tele) || continue
+            for mjd in keys(root[tele])
                 push!(tele_mjd_pairs, (tele, mjd))
             end
         end
     end
     get_runlist_partial(argtup) = get_telemjd_runlist_from_almanac(
-        almanacViewFile, argtup[1], argtup[2], accepted_fibtypes=["sky"])
+        almanacFile, argtup[1], argtup[2], accepted_fibtypes=["sky"])
     run_lsts = if runlist_parallel
         pmap(get_runlist_partial, tele_mjd_pairs)
     else
@@ -118,7 +96,7 @@ end
 e5_sortkey(e) = (e.tele, parse(Int, e.mjd), e.expnum, e.adjfiberindx)
 
 """
-    e5_make_pooled_lists(almanacViewFile, out_dir; wind=E5_WIND, runlist_parallel=true)
+    e5_make_pooled_lists(almanacFile, out_dir; wind=E5_WIND, runlist_parallel=true)
 
 List-generation step (the pooling lives HERE, per AKS). Writes:
   out_dir/e5_sky_pool_lst_NNN.h5  (NNN = adjfiberindx 001-600) with datasets
@@ -128,9 +106,9 @@ List-generation step (the pooling lives HERE, per AKS). Writes:
   out_dir/e5_pool_summary.h5 with per-target pool membership and counts.
 Returns the per-target counts vector (600).
 """
-function e5_make_pooled_lists(almanacViewFile, out_dir; wind=E5_WIND, runlist_parallel=true)
+function e5_make_pooled_lists(almanacFile, out_dir; wind=E5_WIND, runlist_parallel=true)
     mkpath(out_dir)
-    run_lst = e5_collect_sky_runlist(almanacViewFile; runlist_parallel=runlist_parallel)
+    run_lst = e5_collect_sky_runlist(almanacFile; runlist_parallel=runlist_parallel)
     sort!(run_lst, by=e5_sortkey)
 
     # index entries by (teleind, native fiberindx)
@@ -179,7 +157,7 @@ e5_pack_path(pack_dir, tele, mjd, expnum) =
     joinpath(pack_dir, tele, "skypack_" * tele * "_" * mjd * "_" * lpad(expnum, 4, "0") * ".h5")
 
 """
-    e5_extract_pack(reduxBase, almanacViewFile, tele, mjd, expnum; pack_dir)
+    e5_extract_pack(reduxBase, almanacFile, tele, mjd, expnum; pack_dir)
 
 Run the merged guard chain once for one exposure and cache the result.
 Mirrors getSkyRough(...; fibindxoi) exactly: same fibtargDict -> skyfibIndxs
@@ -187,10 +165,10 @@ selection, same column reads, same combine_sky_fibers(skyZcut=10) verdicts.
 Stores ALL candidate columns plus mskSky/skyFibBits so any (target, source)
 lookup reproduces the merged return. Checkpointed on file existence.
 """
-function e5_extract_pack(reduxBase, almanacViewFile, tele, mjd, expnum; pack_dir)
+function e5_extract_pack(reduxBase, almanacFile, tele, mjd, expnum; pack_dir)
     pname = e5_pack_path(pack_dir, tele, mjd, expnum)
     isfile(pname) && return :exists
-    f = h5open(almanacViewFile)
+    f = h5open(almanacFile)
     fibtargDict, _ = get_fibTargDict(f, tele, mjd, expnum)
     close(f)
     fibtypelist = map(x -> fibtargDict[x], 1:300)
