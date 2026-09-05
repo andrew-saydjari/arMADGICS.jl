@@ -54,10 +54,15 @@ logmsg(isempty(fails) ? "STRUCTURAL: PASS on all 300 (S1,S3,S4,S5 + mask)" :
 foreach(m -> logmsg("  ", m), fails[1:min(end, 20)])
 logmsg(@sprintf("λ1 across 300 apo fibers: min %.4g med %.4g max %.4g", minimum(lam1), median(lam1), maximum(lam1)))
 logmsg(@sprintf("λ2 across 300 apo fibers: min %.4g med %.4g max %.4g", minimum(lam2), median(lam2), maximum(lam2)))
+for (nm, v) in (("λ1", lam1), ("λ2", lam2))
+    top = sortperm(v, rev=true)[1:5]
+    logmsg("  top-5 $nm fibers: ", join(["f$(lpad(i,3,"0"))=$(round(v[i],sigdigits=4))" for i in top], "  "))
+end
 
 # exact-reproduction control vs E6 built_new (same samples/builder/mask/env)
 repro_ok = true
-for fib in (101, 245, 295, 335)
+for fib in (101, 245, 295)   # NOTE: E6's fourth fiber 335 is LCO (adjfib>300), not APO
+    global repro_ok
     Vn, ln_, _ = loadprior(joinpath(BUILT, "APOGEE_starcont_svd_60_f" * lpad(fib, 3, "0") * ".h5"))
     Vr, lr, _ = loadprior(joinpath(E6D, "built_new", "APOGEE_starcont_svd_60_f" * lpad(fib, 3, "0") * ".h5"))
     bit = (Vn == Vr) && (ln_ == lr)
