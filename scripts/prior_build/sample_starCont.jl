@@ -219,11 +219,13 @@ end
 end
 
 # gen_starCont_samples(runlist_range,loc_parallel=true)
-# ARM_STARCONT_RANGE="a:b" restricts the adjusted-fiber range (default 1:600).
-# E4b uses 301:600 to regenerate ONLY the LCO half against the C2_LCO=3000 tfunlist.
+# ARM_STARCONT_RANGE restricts the adjusted fibers (default 1:600). Accepts
+# comma-separated tokens, each "a:b" or a single index (e.g. "388,448,459,519").
+# E4b used 301:600; the intelligent-policy delta run resamples the 4 changed fibers.
 run_range = let s = get(ENV, "ARM_STARCONT_RANGE", "1:600")
-    lo, hi = parse.(Int, split(s, ":"))
-    lo:hi
+    sort(unique(reduce(vcat, [occursin(":", tok) ?
+        collect(parse(Int, split(tok, ":")[1]):parse(Int, split(tok, ":")[2])) :
+        [parse(Int, tok)] for tok in split(s, ",")])))
 end
 println("sampling adjusted-fiber range: $run_range"); flush(stdout)
 @showprogress pmap(gen_starCont_samples, run_range)
