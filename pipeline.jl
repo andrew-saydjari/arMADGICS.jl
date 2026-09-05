@@ -225,12 +225,10 @@ end
         if !isfile(savename)
             # We are loading the priors EVERY time, so there is no benefit to ordering
             # This is not optimal, but reduces scope confusion.
-            # Per-fiber prior loading (incl. the ddstaronly guard) lives in
-            # src/priors.jl::load_fiber_priors, shared with the fixture driver.
-            # TODO(E7): V_starlines is still the reference-LSF TH prior for all fibers
-            # (the pipeline.jl:285-era "#hack"); branch run/E7-starlines-perfiber
-            # delivers the per-fiber TH-with-new-LSF starLines set and a follow-up
-            # commit repoints this inside load_fiber_priors (DD per-fiber -> pass-2).
+            # Per-fiber prior loading (incl. the ddstaronly guard and the E7
+            # per-fiber starLines repoint, per scripts/validation/E7/REPOINTING_SPEC.md
+            # on run/E7-starlines-perfiber) lives in src/priors.jl::load_fiber_priors,
+            # shared with the fixture driver. DD starLines per-fiber -> pass-2.
 
             ### Single spectrum loop
             prior_vec = load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=ddstaronly)

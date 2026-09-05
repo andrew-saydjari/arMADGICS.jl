@@ -49,7 +49,8 @@ end
 prior_dir_real = "/mnt/ceph/users/sdssv/work/asaydjari/"
 pd_real = build_prior_dict(prior_dir_real)
 if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5") &&
-   isfile(pd_real["skycont"] * "085.h5") && isfile(pd_real["skyLines_faint"] * "085.h5")
+   isfile(pd_real["skycont"] * "085.h5") && isfile(pd_real["skyLines_faint"] * "085.h5") &&
+   isfile(pd_real["starLines_LSF"] * "085.h5")
     @testset "priors: load_fiber_priors contract (real files)" begin
         pv = load_fiber_priors(pd_real, 85)
         @test length(pv) == 10
@@ -65,8 +66,19 @@ if isfile(pd_real["chebmsk"]) && isfile(pd_real["starCont_apo"] * "085.h5") &&
         @test size(V_skyline_faint) == (npix, 120)
         @test all(isfinite, V_skyline_faint)
         @test size(V_starlines_refLSF, 1) == npix
-        @test V_starlines === V_starlines_refLSF # E7 not yet wired (TODO tracked)
+        # E7: fit basis is the PER-FIBER prior (same shape family as refLSF),
+        # report basis stays refLSF; distinct arrays in default mode
+        @test size(V_starlines) == (npix, 50, 10)
+        @test V_starlines !== V_starlines_refLSF
+        @test V_starlines != V_starlines_refLSF
+        @test all(isfinite, V_starlines)
         @test length(msk_starCor) == npix && all(msk_starCor)
+        # hack-mode fallback must restore the pre-E7 behavior exactly
+        ENV["ARM_STARLINES_REFLSF_HACK"] = "1"
+        pv_hack = load_fiber_priors(pd_real, 85)
+        delete!(ENV, "ARM_STARLINES_REFLSF_HACK")
+        @test pv_hack[7] === pv_hack[6] # V_starlines aliases V_starlines_refLSF
+        @test pv_hack[6] == V_starlines_refLSF
         # masks are Bool and skymsk can only shrink chebmsk
         for m in (skymsk_bright, skymsk_faint, skymsk)
             @test eltype(m) == Bool && length(m) == npix

@@ -13,6 +13,10 @@
 #                           default <prior_dir>/2026_09_04/prior_outputs/sky_pass1/built
 #   ARM_CHIPGAP_MSK         per-telescope chip-gap/cheb mask file (audit item 3)
 #                           default <prior_dir>/2026_04_25/StarContChipGapMsk.h5
+#   ARM_STARLINES_PRIOR_DIR E7 per-fiber TH starLines priors (audit item 2)
+#                           default <prior_dir>/2026_09_05/prior_outputs/starLines_perfiber
+#   ARM_STARLINES_REFLSF_HACK=1  fall back to the pre-E7 refLSF hack
+#                           (V_starlines = V_starlines_refLSF) — regression use only
 
 """
     build_prior_dict(prior_dir)
@@ -56,10 +60,21 @@ function build_prior_dict(prior_dir)
     prior_dict["chebmsk"] = get(ENV, "ARM_CHIPGAP_MSK",
         joinpath(prior_dir, "2026_04_25/StarContChipGapMsk.h5"))
 
-    # Reference-LSF TH starLines prior (E7 will add the per-fiber starLines set;
-    # the refLSF file remains the restframe-export basis even after E7)
+    # starLines (audit item 2, E7 wiring per scripts/validation/E7/REPOINTING_SPEC.md
+    # on run/E7-starlines-perfiber):
+    # - starLines_refLSF MUST stay pointed at the 2025_07_31 file: the per-fiber
+    #   priors are K_fiber * Vout of the SAME fullres Vout (md5 0dcf0ea9...) that
+    #   produced it, which keeps the fit-at-fiber-LSF / report-at-refLSF coefficient
+    #   pairing in update_Ctotinv_Vstarstarlines_asym valid. Never regenerate or
+    #   renormalize either side independently.
+    # - starLines_LSF: E7 per-fiber TH priors built with the new FPI LSFs
+    #   (get_lsf_matrix, MJD 60861 params); Vmat Float64 (8700, 50, 10),
+    #   subpix index 6 = zero shift, amplitude-scaled (no renormalization).
     prior_dict["starLines_refLSF"] = joinpath(prior_dir,
         "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5")
+    starlines_root = get(ENV, "ARM_STARLINES_PRIOR_DIR",
+        joinpath(prior_dir, "2026_09_05/prior_outputs/starLines_perfiber"))
+    prior_dict["starLines_LSF"] = joinpath(starlines_root, "APOGEE_stellar_kry_50_subpix_f")
 
     return prior_dict
 end
@@ -99,16 +114,18 @@ Masking layout (DR17 consumption pattern, apMADGICS pipeline.jl):
   `chebmsk_exp` (no per-fiber bright submask exists; the bright component is
   neither modeled nor exported).
 
-`ddstaronly=true` is refused loudly: the per-fiber DD starLines priors are an E7/
-pass-2 deliverable (on pre-integration main this flag silently read `msk_starCor`
-from a CLOSED file handle — latent crash, audit item 2 note).
+`ddstaronly=true` is refused loudly: the per-fiber DD starLines priors are a
+pass-2 deliverable (the E7 TH files carry no `msk_starCor`; on pre-integration
+main this flag silently read `msk_starCor` from a CLOSED file handle — latent
+crash, audit item 2 note).
 """
 function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
     if ddstaronly
-        error("ddstaronly=true requires per-fiber DD starLines priors (E7 deliverable, " *
-            "not yet wired; DD structurally needs a completed arM run and rides to " *
-            "pass-2). Refusing to run rather than reading msk_starCor from an " *
-            "unopened file (latent bug on pre-integration main).")
+        error("ddstaronly=true requires per-fiber DD starLines priors (pass-2: DD " *
+            "structurally needs a completed arM run as training data; the E7 TH " *
+            "per-fiber files carry no msk_starCor). Refusing to run rather than " *
+            "crashing on a missing dataset (on pre-integration main this path read " *
+            "msk_starCor from an unopened file).")
     end
     (1 <= adjfiberindx <= 600) || error("adjfiberindx=$adjfiberindx outside 1:600")
     tele_key = adjfiberindx > 300 ? "lco" : "apo"
@@ -118,16 +135,27 @@ function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
         convert.(Bool, read(f[tele_key]))
     end
 
-    # starLines: reference-LSF TH prior for all fibers.
-    # TODO(E7): replace with the per-fiber TH-with-new-LSF priors once branch
-    # run/E7-starlines-perfiber delivers them (audit item 2; the
-    # "V_starlines = V_starlines_refLSF #hack"); a follow-up commit lands it here.
-    # The refLSF prior stays loaded regardless: V_starlines_refLSF[:,:,6] is the
-    # restframe-export basis.
+    # starLines (E7 landed): fit basis = per-fiber TH prior with the new FPI LSFs;
+    # report/restframe basis = the refLSF prior (V_starlines_refLSF[:,:,6] is the
+    # restframe-export basis; coefficient pairing requires the same parent Vout —
+    # see build_prior_dict). ARM_STARLINES_REFLSF_HACK=1 restores the pre-E7
+    # refLSF-for-all-fibers hack byte-identically (regression comparisons only;
+    # E7 measured the hack costs +0.056±0.017 pix RV systematic on the M123 fixture).
     f = h5open(prior_dict["starLines_refLSF"])
     V_starlines_refLSF = read(f["Vmat"])
     close(f)
-    V_starlines = V_starlines_refLSF # E7 pending (see TODO above)
+    V_starlines = if get(ENV, "ARM_STARLINES_REFLSF_HACK", "0") == "1"
+        V_starlines_refLSF
+    else
+        fname = per_fiber_prior_file(prior_dict["starLines_LSF"], adjfiberindx)
+        h5open(fname) do f
+            read(f["Vmat"])
+        end
+    end
+    # NOTE (deviation from REPOINTING_SPEC.md): the spec sketches an inert
+    # ddstaronly branch reading msk_starCor from the per-fiber file; the E7 TH
+    # files carry no msk_starCor (DD priors are pass-2), so ddstaronly stays a
+    # LOUD refusal above instead of becoming a latent KeyError here.
     msk_starCor = ones(Bool, length(chebmsk_exp))
 
     # starCont (audit item 1): per-fiber pass-1 prior (files carry Vmat, λv,
