@@ -90,22 +90,43 @@ begin
         # (partial builds), which previously threw inside Colorbar/extract_colormap
         crange = extrema(fin)
         crange = crange[1] == crange[2] ? (crange[1] - 1, crange[2] + 1) : crange
-        hm = heatmap!(ax, 1:600, 1:size(L, 1), Z', colormap=:CET_L8, colorrange=crange)
-        Colorbar(fig[i, 2], hm, label="log10 λ")
+        heatmap!(ax, 1:600, 1:size(L, 1), Z', colormap=:inferno, colorrange=crange)
+        # build the Colorbar from explicit kwargs, NOT from the plot object: the
+        # plot-introspection path (extract_colormap -> get_colormapping) throws on
+        # partially-NaN heatmap data even when colorrange is given explicitly
+        Colorbar(fig[i, 2], colormap=:inferno, limits=crange, label="log10 λ")
     end
     save(joinpath(plot_dir, "fig_qa_lambda_heatmaps.png"), fig, px_per_unit=2)
 end
 
 ## 3. drop-variant sensitivity (screened vs unscreened) for QA fibers
 princ_angles(V1, V2, k) = svdvals(Matrix(qr(V1[:, 1:k]).Q)' * Matrix(qr(V2[:, 1:k]).Q))
+
+"""
+    energy_capture(V1, V2, k)
+
+Fraction of V1's leading-k energy lying in span(V2[:,1:k]). This, not the worst
+principal angle, is the meaningful prior-vs-prior metric at DEEP truncations: the worst
+angle is set by the lowest-variance direction, and when the spectrum is near-degenerate
+at the cut (measured: lambda30/lambda31 = 1.03-1.04 for the GSPICE priors) the identity
+of the last retained mode swaps freely between builds, producing ~90 deg angles that mean
+nothing. Same class of trap as the SVD sign gauge (e5_skycont_gauge_diag.jl).
+"""
+function energy_capture(V1, V2, k)
+    Q2 = Matrix(qr(V2[:, 1:k]).Q)
+    return sum(abs2, Q2' * V1[:, 1:k]) / sum(abs2, V1[:, 1:k])
+end
 for f in qa_fibers
     for (namer, k, tag) in [(skycont_name, 10, "skyCont k=10"), (skygspice_name, 30, "GSPICE k=30")]
         p1, p2 = namer(built, f), namer(built_u, f)
         if isfile(p1) && isfile(p2)
             V1 = h5read(p1, "Vmat"); V2 = h5read(p2, "Vmat")
-            s = princ_angles(V1, V2, k)
-            worst = acosd(clamp(minimum(s), 0, 1))
-            push!(report, @sprintf("drop-variant fiber %03d %s: worst principal angle %.3f deg (cos=%.6f)", f, tag, worst, minimum(s)))
+            worst = acosd(clamp(minimum(princ_angles(V1, V2, k)), 0, 1))
+            shallow = acosd(clamp(minimum(princ_angles(V1, V2, min(5, k))), 0, 1))
+            cap = energy_capture(V1, V2, k)
+            push!(report, @sprintf("drop-variant fiber %03d %s: energy capture %.4f | angle k=5 %.2f deg, worst k=%d %.2f deg%s",
+                f, tag, cap, shallow, k, worst,
+                cap > 0.999 ? " -> AGREE (deep angle is near-degenerate truncation gauge)" : " -> INVESTIGATE"))
         else
             push!(report, @sprintf("drop-variant fiber %03d %s: MISSING (%s / %s)", f, tag, isfile(p1), isfile(p2)))
         end
