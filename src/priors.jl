@@ -30,7 +30,7 @@ src/priors.jl. Per-fiber entries are PREFIXES completed as
 function build_prior_dict(prior_dir)
     prior_dict = Dict{String,String}()
 
-    # Star continuum (audit item 1): per-fiber pass-1b builds, split by telescope
+    # Star continuum (audit item 1): per-fiber pass-1c builds, split by telescope
     starcont_root = get(ENV, "ARM_STARCONT_PRIOR_DIR",
         joinpath(prior_dir, "2026_09_05/prior_outputs/starCont_pass1c"))
     prior_dict["starCont_apo"] = joinpath(starcont_root, "built_apo", "APOGEE_starcont_svd_60_f")
