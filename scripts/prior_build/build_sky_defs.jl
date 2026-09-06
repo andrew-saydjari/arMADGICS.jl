@@ -139,7 +139,93 @@ function build_skyCont(adjfibindx; sample_dir, chipgap_msk_path,
 end
 
 # bright/faint sky-line split threshold: APO fibers (adjfibindx<=300) vs LCO (301-600)
+# INHERITED FROM apMADGICS (src/prior_build/build_skyLines.jl:56-62), where the samples
+# were DRP apCframe fluxes. arM samples ar1Dunical, whose flux scale is ~58x (APO) /
+# ~81x (LCO) smaller, so these constants flag ZERO pixels here — a silent no-op.
+# See prior_outputs/sky_pass1/THRESHOLD_FINDING.md (finding #35). Do not "fix" the
+# numbers without a policy decision; use bright_policy= (below), which is guarded.
 default_thresh_bright_faint(adjfibindx) = (adjfibindx <= 300) ? 2000 : 645
+
+"""
+    resolve_bright_threshold(policy, adjfibindx, median_sky, legacy_fun) -> (thresh, desc)
+
+Resolve the bright/faint split threshold under a threshold POLICY, so the choice is a
+parameter rather than a hardcoded constant. `policy` is `nothing` (legacy: use
+`legacy_fun(adjfibindx)`, i.e. the inherited 2000/645) or a Dict with `:mode`:
+
+  - `:off`       — no split at all; returns `nothing`. Faint prior spans every pixel
+                   (this is exactly what the inherited constants do today, but declared).
+  - `:absolute`  — `policy[:apo]` / `policy[:lco]`, in the sample's own flux units.
+  - `:quantile`  — `policy[:bright_frac]`: solve (bisection on the POST-`expand_msk`
+                   fraction, so the target is the realized bright fraction) for the
+                   threshold flagging that fraction of pixels. Unit-free: immune to any
+                   future change of flux normalization.
+
+Returns the threshold (or `nothing` for `:off`) and a human-readable description that
+is recorded in the built prior for provenance.
+"""
+function resolve_bright_threshold(policy, adjfibindx, median_sky, legacy_fun=default_thresh_bright_faint)
+    if isnothing(policy)
+        t = legacy_fun(adjfibindx)
+        return float(t), "legacy inherited absolute (apo 2000 / lco 645; see THRESHOLD_FINDING.md)"
+    end
+    mode = get(policy, :mode, :absolute)
+    if mode == :off
+        return nothing, "split off (single unified sky-line prior over all pixels)"
+    elseif mode == :absolute
+        v = (adjfibindx <= 300) ? policy[:apo] : policy[:lco]
+        return float(v), "absolute apo=$(policy[:apo]) lco=$(policy[:lco])"
+    elseif mode == :quantile
+        target = float(policy[:bright_frac])
+        (0 < target < 1) || error("resolve_bright_threshold: :bright_frac must be in (0,1), got $target")
+        vals = filter(isfinite, median_sky)
+        isempty(vals) && error("resolve_bright_threshold: median_sky has no finite entries for adjfibindx=$adjfibindx")
+        npix = length(median_sky)
+        lo, hi = max(minimum(vals), 1e-6), max(maximum(vals), 1e-3)
+        thr = hi
+        for _ in 1:60
+            mid = sqrt(lo * hi)
+            fr = count(.!expand_msk(median_sky .< mid, rad=4)) / npix
+            fr > target ? (lo = mid) : (hi = mid)
+            thr = sqrt(lo * hi)
+        end
+        return thr, "quantile target_bright_frac=$(target) -> thresh=$(round(thr, digits=4))"
+    end
+    error("resolve_bright_threshold: unknown policy mode $(repr(mode)) (expected :off, :absolute, :quantile)")
+end
+
+"""
+    check_bright_fraction(frac, adjfibindx, thresh, desc; bounds, guard, split_off)
+
+Sanity guard on the realized bright fraction of the bright/faint split (finding #35:
+the inherited thresholds silently flagged 0% of pixels in ar1Dunical units, while the
+deployed DR17-era priors split ~8.3%). Fires when `frac` falls outside `bounds`
+(default 1%-20%); `guard` is `:error`, `:warn` (default), or `:off`. Skipped when
+`split_off` is true, where a 0% fraction is the declared intent (and is asserted).
+"""
+function check_bright_fraction(frac, adjfibindx, thresh, desc;
+        bounds=(0.01, 0.20), guard::Symbol=:warn, split_off::Bool=false)
+    if split_off
+        iszero(frac) || error("check_bright_fraction: split declared OFF for adjfibindx=$adjfibindx but $(100frac)% of pixels were flagged bright")
+        return frac
+    end
+    lo, hi = bounds
+    if !(lo <= frac <= hi)
+        msg = "build_skyLines bright/faint split flagged $(round(100frac, digits=4))% of pixels " *
+              "for adjfibindx=$adjfibindx (threshold=$thresh, policy: $desc), outside the expected " *
+              "[$(100lo)%, $(100hi)%] band. 0% means the threshold is a SILENT NO-OP in these flux " *
+              "units — the failure mode of finding #35 (THRESHOLD_FINDING.md): the inherited " *
+              "apo 2000 / lco 645 flag nothing on ar1Dunical samples, where the deployed DR17-era " *
+              "priors split ~8.3%. Set bright_policy=Dict(:mode=>:off) to declare a no-split build."
+        if guard == :error
+            error(msg)
+        elseif guard == :warn
+            @warn msg
+            println("WARNING: " * msg); flush(stdout)
+        end
+    end
+    return frac
+end
 
 """
     build_skyLines(adjfibindx; sample_dir, chipgap_msk_path, out_dir="sky_priors/",
@@ -161,7 +247,8 @@ included by the caller.
 function build_skyLines(adjfibindx; sample_dir, chipgap_msk_path,
         out_dir="sky_priors/", nsub_faint=120, nsub_bright=120,
         nsigma_schedule=[20, 8, 6], usamp_factor=7, maxbadpix=650, reg_eps=1e-3,
-        min_obscnt=10, thresh_bright_faint=default_thresh_bright_faint, silent=true)
+        min_obscnt=10, thresh_bright_faint=default_thresh_bright_faint, silent=true,
+        bright_policy=nothing, bright_frac_bounds=(0.01, 0.20), bright_guard::Symbol=:warn)
     fnameFaint = joinpath(out_dir, "APOGEE_skyline_faint_svd_"*string(nsub_faint)*"_f"*lpad(adjfibindx,3,"0")*".h5")
 
     fnameFaintGSPICE = joinpath(out_dir, "APOGEE_skyline_faint_GSPICE_svd_"*string(nsub_bright)*"_f"*lpad(adjfibindx,3,"0")*".h5")
@@ -195,7 +282,20 @@ function build_skyLines(adjfibindx; sample_dir, chipgap_msk_path,
 
         submsk_bright = copy(submsk)
         submsk_faint = copy(submsk)
-        mskflux = .!expand_msk(median_sky .< thresh_bright_faint(adjfibindx),rad=4)
+        # E5 finding #35: the split threshold is now a guarded POLICY, not a bare
+        # constant. Default (bright_policy=nothing) reproduces the inherited
+        # thresh_bright_faint behaviour exactly; the guard reports when that behaviour
+        # is a no-op instead of failing silently.
+        bright_thresh, bright_desc = resolve_bright_threshold(
+            bright_policy, adjfibindx, median_sky, thresh_bright_faint)
+        mskflux = if isnothing(bright_thresh)
+            falses(length(median_sky))          # split off: nothing is bright
+        else
+            .!expand_msk(median_sky .< bright_thresh, rad=4)
+        end
+        bright_frac = count(mskflux) / length(mskflux)
+        check_bright_fraction(bright_frac, adjfibindx, bright_thresh, bright_desc;
+            bounds=bright_frac_bounds, guard=bright_guard, split_off=isnothing(bright_thresh))
         mskflux_big = zeros(Bool,length(submsk))
         mskflux_big[submsk].=mskflux
 
@@ -226,6 +326,10 @@ function build_skyLines(adjfibindx; sample_dir, chipgap_msk_path,
                 h5write(fnameFaint,"Vmat",EVEC[:,1:nsub_faint]*Diagonal(sqrt.(SF.S[1:nsub_faint])))
                 h5write(fnameFaint,"λv",SF.S[1:nsub_faint])
                 h5write(fnameFaint,"submsk",convert.(Int,submsk)) # different for bright/faint skylines
+                # E5 finding #35 provenance: what the split actually did on this fiber
+                h5write(fnameFaint,"bright_thresh",isnothing(bright_thresh) ? NaN : float(bright_thresh))
+                h5write(fnameFaint,"bright_frac",bright_frac)
+                h5write(fnameFaint,"bright_policy",bright_desc)
             end
 
             # Faint GSPICE
@@ -253,6 +357,9 @@ function build_skyLines(adjfibindx; sample_dir, chipgap_msk_path,
                 h5write(fnameFaintGSPICE,"Vmat",EVEC[:,1:nsub_bright]*Diagonal(sqrt.(SF.S[1:nsub_bright])))
                 h5write(fnameFaintGSPICE,"λv",SF.S[1:nsub_bright])
                 h5write(fnameFaintGSPICE,"submsk",convert.(Int,submsk)) # different for bright/faint skylines
+                h5write(fnameFaintGSPICE,"bright_thresh",isnothing(bright_thresh) ? NaN : float(bright_thresh))
+                h5write(fnameFaintGSPICE,"bright_frac",bright_frac)
+                h5write(fnameFaintGSPICE,"bright_policy",bright_desc)
             end
         end
     end

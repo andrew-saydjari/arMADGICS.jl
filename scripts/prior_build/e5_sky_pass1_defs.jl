@@ -482,3 +482,54 @@ function e5_claim_fiber(built_dir, adjfib)
     end
     return true
 end
+
+"""
+    e5_parse_thresh_policy(spec) -> (policy, tag)
+
+Parse the E5 bright/faint threshold POLICY spec (finding #35) into the `bright_policy`
+argument of `build_skyLines` plus a short tag used to name the policy's output dir, so
+a rebuild under any option never overwrites products built under another.
+
+  "legacy"          inherited apo 2000 / lco 645 (a silent no-op on ar1Dunical samples)
+  "off"             declared no-split: one unified sky-line prior over all pixels
+  "abs:APO,LCO"     absolute per-telescope thresholds, e.g. "abs:35,8" or "abs:150,40"
+  "quantile:FRAC"   unit-free: flag FRAC of pixels bright per fiber, e.g. "quantile:0.083"
+"""
+function e5_parse_thresh_policy(spec::AbstractString)
+    spec = strip(spec)
+    if spec == "legacy"
+        return nothing, "legacy"
+    elseif spec == "off"
+        return Dict(:mode => :off), "nosplit"
+    elseif startswith(spec, "abs:")
+        parts = split(spec[5:end], ",")
+        (length(parts) == 2) || error("e5_parse_thresh_policy: abs: needs APO,LCO (got $spec)")
+        apo, lco = parse.(Float64, parts)
+        fmt(x) = replace(string(round(x, digits=3)), "." => "p")
+        return Dict(:mode => :absolute, :apo => apo, :lco => lco), "abs_apo$(fmt(apo))_lco$(fmt(lco))"
+    elseif startswith(spec, "quantile:")
+        fr = parse(Float64, spec[10:end])
+        return Dict(:mode => :quantile, :bright_frac => fr), "q" * replace(string(fr), "." => "p")
+    end
+    error("e5_parse_thresh_policy: unknown policy spec $(repr(spec)) (expected legacy|off|abs:APO,LCO|quantile:FRAC)")
+end
+
+"""
+    e5_link_skycont(src_built, dst_built) -> Int
+
+Reuse existing skyCont priors in a policy rebuild dir by symlinking them, so the
+checkpoint in `build_skyCont` skips them (skyCont is threshold-policy invariant —
+asserted by scripts/prior_build/e5_assert_skycont_invariant.jl). Returns the count.
+"""
+function e5_link_skycont(src_built, dst_built)
+    mkpath(dst_built)
+    n = 0
+    for f in readdir(src_built)
+        startswith(f, "APOGEE_skycont_svd_") || continue
+        dst = joinpath(dst_built, f)
+        ispath(dst) && continue
+        symlink(realpath(joinpath(src_built, f)), dst)
+        n += 1
+    end
+    return n
+end

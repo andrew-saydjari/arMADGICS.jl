@@ -56,7 +56,20 @@ pack_dir = joinpath(e5_out, "packs")
 src_dir = joinpath(e5_out, "src_samples")
 sample_dir = joinpath(e5_out, sample_subdir)
 screen_dir = joinpath(e5_out, "screens")
-built_dir = joinpath(e5_out, unscreened ? "built_unscreened" : "built")
+# E5 finding #35: bright/faint threshold POLICY (legacy|off|abs:APO,LCO|quantile:FRAC).
+# A non-legacy policy writes to its own policy-tagged dir so a rebuild never collides
+# with (or overwrites) the products already in built/.
+thresh_policy_spec = get(ENV, "E5_THRESH_POLICY", "legacy")
+bright_policy, policy_tag = (nothing, "legacy")  # resolved after includes
+bright_guard = Symbol(get(ENV, "E5_BRIGHT_GUARD", "warn"))
+built_default = if unscreened
+    "built_unscreened"
+elseif policy_tag == "legacy"
+    "built"
+else
+    "built_" * policy_tag
+end
+built_dir = joinpath(e5_out, get(ENV, "E5_BUILT_DIR", built_default))
 for d in (e5_out, list_dir, screen_dir)
     mkpath(d)
 end
@@ -205,6 +218,15 @@ elseif stage == "decompose"
 
 elseif stage == "build"
     mkpath(built_dir)
+    # resolve the threshold policy now that the defs are loaded on all workers
+    bright_policy, policy_tag = e5_parse_thresh_policy(thresh_policy_spec)
+    println("build: threshold policy spec=$thresh_policy_spec tag=$policy_tag guard=$bright_guard out=$built_dir")
+    if policy_tag != "legacy" && !unscreened
+        nlink = e5_link_skycont(joinpath(e5_out, "built"), built_dir)
+        println("build: reused $nlink existing skyCont priors by symlink (threshold-policy invariant; see e5_assert_skycont_invariant.jl)")
+    end
+    @passobj 1 workers() bright_policy
+    @passobj 1 workers() bright_guard
     # E5 concurrent-build safety: skip-if-built + atomic per-fiber claims so the
     # on-node ccalin051 run and the AKS sbatch job can overlap without ever
     # double-building. E5_BUILD_ORDER=desc makes the two runs approach from
@@ -225,7 +247,8 @@ elseif stage == "build"
                 r[:cont_s] = round(time() - t1, digits=1)
                 t1 = time()
                 build_skyLines(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
-                    out_dir=built_dir) # GSPICE knobs untouched: usamp_factor=7 etc. defaults
+                    out_dir=built_dir, bright_policy=bright_policy, bright_guard=bright_guard)
+                    # GSPICE knobs untouched: usamp_factor=7 etc. defaults
                 r[:lines_s] = round(time() - t1, digits=1)
                 r[:status] = :ok
             catch err
