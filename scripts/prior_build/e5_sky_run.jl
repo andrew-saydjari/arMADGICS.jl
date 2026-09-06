@@ -233,6 +233,12 @@ elseif stage == "build"
     # opposite ends (on-node asc, sbatch desc).
     build_order = get(ENV, "E5_BUILD_ORDER", "asc")
     fibers_build = build_order == "desc" ? reverse(fibers) : fibers
+    # E5_FIBER_ROTATE staggers the START POINT of each cooperating job-array task so
+    # they do not all contend for the same fiber's claim at launch. Every task still
+    # walks the WHOLE list (wrapping around), which is what preserves global dynamic
+    # load balancing across nodes -- contiguous per-task slices would lose it.
+    rot = parse(Int, get(ENV, "E5_FIBER_ROTATE", "0"))
+    rot != 0 && (fibers_build = circshift(fibers_build, -mod(rot, length(fibers_build))))
     res = @showprogress pmap(adjfib -> begin
         r = Dict{Symbol,Any}(:adjfib => adjfib)
         if e5_built_done(built_dir, adjfib)

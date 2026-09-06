@@ -77,8 +77,20 @@ push!(report, @sprintf("built priors present: skyCont %d/600, faint %d/600, fain
 begin
     fig = Figure(size=(1400, 800))
     for (i, (L, ttl)) in enumerate([(Lc, "skyCont λv (rank 30)"), (Lf, "skyLines faint λv (rank 120)"), (Lg, "skyLines faint GSPICE λv (rank 120)")])
-        ax = Axis(fig[i, 1], xlabel=i == 3 ? "adjfiberindx" : "", ylabel="mode", title=ttl)
-        hm = heatmap!(ax, 1:600, 1:size(L, 1), log10.(max.(L, 1e-12))', colormap=:CET_L8)
+        nbuilt_i = count(.!isnan.(L[1, :]))
+        ax = Axis(fig[i, 1], xlabel=i == 3 ? "adjfiberindx" : "", ylabel="mode",
+            title=ttl * " — $(nbuilt_i)/600 built")
+        Z = log10.(max.(L, 1e-12))
+        fin = filter(isfinite, Z)
+        if isempty(fin)
+            text!(ax, 0.5, 0.5, text="no priors built yet", space=:relative, align=(:center, :center))
+            continue
+        end
+        # explicit colorrange: Makie cannot derive limits when columns are all-NaN
+        # (partial builds), which previously threw inside Colorbar/extract_colormap
+        crange = extrema(fin)
+        crange = crange[1] == crange[2] ? (crange[1] - 1, crange[2] + 1) : crange
+        hm = heatmap!(ax, 1:600, 1:size(L, 1), Z', colormap=:CET_L8, colorrange=crange)
         Colorbar(fig[i, 2], hm, label="log10 λ")
     end
     save(joinpath(plot_dir, "fig_qa_lambda_heatmaps.png"), fig, px_per_unit=2)

@@ -528,8 +528,15 @@ function e5_link_skycont(src_built, dst_built)
         startswith(f, "APOGEE_skycont_svd_") || continue
         dst = joinpath(dst_built, f)
         ispath(dst) && continue
-        symlink(realpath(joinpath(src_built, f)), dst)
-        n += 1
+        # RACE-SAFE: with a job ARRAY every task runs this concurrently, so the
+        # ispath check above can pass in two tasks at once; the loser gets EEXIST
+        # and that is a success, not an error.
+        try
+            symlink(realpath(joinpath(src_built, f)), dst)
+            n += 1
+        catch err
+            ispath(dst) || rethrow(err)
+        end
     end
     return n
 end
