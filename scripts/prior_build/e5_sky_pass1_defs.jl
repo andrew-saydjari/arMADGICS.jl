@@ -494,6 +494,8 @@ a rebuild under any option never overwrites products built under another.
   "off"             declared no-split: one unified sky-line prior over all pixels
   "abs:APO,LCO"     absolute per-telescope thresholds, e.g. "abs:35,8" or "abs:150,40"
   "quantile:FRAC"   unit-free: flag FRAC of pixels bright per fiber, e.g. "quantile:0.083"
+  "linedetect"      CALIBRATED detector (AKS 2026-09-06): running-MAD scale over 2001 px,
+                    outlier cut k=90, dilation 4. Tune as "linedetect:SW,K,DIL[,CONTWIN]".
 """
 function e5_parse_thresh_policy(spec::AbstractString)
     spec = strip(spec)
@@ -507,6 +509,19 @@ function e5_parse_thresh_policy(spec::AbstractString)
         apo, lco = parse.(Float64, parts)
         fmt(x) = replace(string(round(x, digits=3)), "." => "p")
         return Dict(:mode => :absolute, :apo => apo, :lco => lco), "abs_apo$(fmt(apo))_lco$(fmt(lco))"
+    elseif spec == "linedetect" || startswith(spec, "linedetect:")
+        # "linedetect" (calibrated default) or "linedetect:SCALEWIN,K,DILATION[,CONTWIN]"
+        sw, k, dil, cw = 2001, 90.0, 4, 0
+        if startswith(spec, "linedetect:")
+            parts = split(spec[12:end], ",")
+            (length(parts) >= 3) || error("e5_parse_thresh_policy: linedetect: needs SCALEWIN,K,DILATION[,CONTWIN] (got $spec)")
+            sw = parse(Int, parts[1]); k = parse(Float64, parts[2]); dil = parse(Int, parts[3])
+            length(parts) >= 4 && (cw = parse(Int, parts[4]))
+        end
+        ktag = replace(string(k), "." => "p")
+        return Dict(:mode => :linedetect, :scale_window => sw, :k => k,
+                :dilation => dil, :cont_window => cw),
+            "linedet_sw$(sw)_k$(ktag)_d$(dil)" * (cw == 0 ? "" : "_cw$(cw)")
     elseif startswith(spec, "quantile:")
         fr = parse(Float64, spec[10:end])
         return Dict(:mode => :quantile, :bright_frac => fr), "q" * replace(string(fr), "." => "p")

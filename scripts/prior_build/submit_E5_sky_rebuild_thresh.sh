@@ -17,6 +17,7 @@
 #
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "<policy>"   # submits all 7 array tasks
 #
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "linedetect"      # RECOMMENDED (calibrated)
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:35,8"        # (A) match DR17 ~8.3% bright
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:150,40"      # (B) physical bright lines, ~5%
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "quantile:0.083"  # (C) unit-free per-fiber quantile
@@ -143,6 +144,10 @@ if [ -z "$E5_THRESH_POLICY" ] || [ "$E5_THRESH_POLICY" = "legacy" ]; then
     exit 2
 fi
 export E5_BRIGHT_GUARD=error
+# calibrated policies land at ~8% bright (DR17: 8.35% APO / 8.15% LCO); 4-15% is loose
+# enough for per-fiber scatter and tight enough to catch a no-op or a runaway mask
+export E5_BRIGHT_FRAC_LO=0.04
+export E5_BRIGHT_FRAC_HI=0.15
 echo "E5_THRESH_POLICY=$E5_THRESH_POLICY E5_BRIGHT_GUARD=$E5_BRIGHT_GUARD E5_NWORKERS=$E5_NWORKERS"
 
 print_elapsed_time "assert skyCont is threshold-policy invariant (gates the symlink reuse)"

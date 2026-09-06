@@ -62,6 +62,8 @@ screen_dir = joinpath(e5_out, "screens")
 thresh_policy_spec = get(ENV, "E5_THRESH_POLICY", "legacy")
 bright_policy, policy_tag = (nothing, "legacy")  # resolved after includes
 bright_guard = Symbol(get(ENV, "E5_BRIGHT_GUARD", "warn"))
+bright_frac_bounds = (parse(Float64, get(ENV, "E5_BRIGHT_FRAC_LO", "0.01")),
+    parse(Float64, get(ENV, "E5_BRIGHT_FRAC_HI", "0.20")))
 built_default = if unscreened
     "built_unscreened"
 elseif policy_tag == "legacy"
@@ -227,6 +229,7 @@ elseif stage == "build"
     end
     @passobj 1 workers() bright_policy
     @passobj 1 workers() bright_guard
+    @passobj 1 workers() bright_frac_bounds
     # E5 concurrent-build safety: skip-if-built + atomic per-fiber claims so the
     # on-node ccalin051 run and the AKS sbatch job can overlap without ever
     # double-building. E5_BUILD_ORDER=desc makes the two runs approach from
@@ -253,7 +256,8 @@ elseif stage == "build"
                 r[:cont_s] = round(time() - t1, digits=1)
                 t1 = time()
                 build_skyLines(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
-                    out_dir=built_dir, bright_policy=bright_policy, bright_guard=bright_guard)
+                    out_dir=built_dir, bright_policy=bright_policy, bright_guard=bright_guard,
+                    bright_frac_bounds=bright_frac_bounds)
                     # GSPICE knobs untouched: usamp_factor=7 etc. defaults
                 r[:lines_s] = round(time() - t1, digits=1)
                 r[:status] = :ok

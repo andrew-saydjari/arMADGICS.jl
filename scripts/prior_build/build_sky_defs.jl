@@ -195,6 +195,64 @@ function resolve_bright_threshold(policy, adjfibindx, median_sky, legacy_fun=def
 end
 
 """
+    resolve_bright_mask(policy, adjfibindx, median_sky, submsk, legacy_fun) -> (mskflux, desc, thresh)
+
+Bright-pixel mask in the builder's COMPRESSED (submsk) space. Handles the scalar-threshold
+policies via `resolve_bright_threshold`, plus the calibrated line DETECTOR
+(`:linedetect`, AKS 2026-09-06), which cannot be expressed as any single flux value.
+
+The detector runs on the FULL wavetarg grid (median_sky scattered back through `submsk`,
+NaN elsewhere) because a moving window over the compressed space would splice chip gaps
+together. Steps, and what the calibration against DR17's actual bright mask said about
+each (see prior_outputs/sky_pass1/BRIGHT_MASK_CALIBRATION.md):
+  1. local continuum: `cont_window` (DEFAULT 0 = OFF). Measured to be unnecessary — the
+     samples are already continuum-subtracted upstream (sample_sky_defs.jl:69), so the
+     baseline is ~0 and subtracting a local median changes pixel IoU by <0.01.
+  2. locally-adaptive SCALE: running MAD over `scale_window` px, then flag z = resid/scale
+     > `k`. This is where the throughput adaptation actually happens (AKS's concern that we
+     have not throughput-divided): a GLOBAL scale under-flags the red end, where an
+     undivided throughput suppresses line amplitudes — red-end line recall 0.73 (global)
+     vs 0.92 (running, APO).
+  3. DILATION by `dilation` px to cover line wings. The calibration independently selects
+     4, which is exactly DR17's own `expand_msk(..., rad=4)`.
+
+Requires scripts/prior_build/e5_bright_line_detect.jl to be included by the caller.
+"""
+function resolve_bright_mask(policy, adjfibindx, median_sky, submsk,
+        legacy_fun=default_thresh_bright_faint)
+    if !isnothing(policy) && get(policy, :mode, :absolute) == :linedetect
+        sw = get(policy, :scale_window, 2001)
+        k = float(get(policy, :k, 90.0))
+        dil = get(policy, :dilation, 4)
+        cw = get(policy, :cont_window, 0)
+        x = fill(NaN, length(submsk))
+        x[submsk] .= median_sky
+        cont = cw == 0 ? zeros(length(x)) : running_median_nan(x, cw)
+        resid = x .- cont
+        scale = running_spread_fast(resid, sw; kind=:mad, stride=50)
+        base = falses(length(x))
+        @inbounds for i in eachindex(x)
+            if isfinite(resid[i]) && isfinite(scale[i]) && scale[i] > 0 && resid[i] > k * scale[i]
+                base[i] = true
+            end
+        end
+        full = dilate_msk(base, dil)
+        @inbounds for i in eachindex(full)
+            isfinite(x[i]) || (full[i] = false)
+        end
+        desc = "linedetect scale_window=$sw k=$k dilation=$dil cont_window=$cw (calibrated vs DR17 bright mask)"
+        return full[submsk], desc, NaN
+    end
+    thr, desc = resolve_bright_threshold(policy, adjfibindx, median_sky, legacy_fun)
+    mskflux = if isnothing(thr)
+        falses(length(median_sky))
+    else
+        .!expand_msk(median_sky .< thr, rad=4)
+    end
+    return mskflux, desc, isnothing(thr) ? nothing : thr
+end
+
+"""
     check_bright_fraction(frac, adjfibindx, thresh, desc; bounds, guard, split_off)
 
 Sanity guard on the realized bright fraction of the bright/faint split (finding #35:
@@ -286,16 +344,12 @@ function build_skyLines(adjfibindx; sample_dir, chipgap_msk_path,
         # constant. Default (bright_policy=nothing) reproduces the inherited
         # thresh_bright_faint behaviour exactly; the guard reports when that behaviour
         # is a no-op instead of failing silently.
-        bright_thresh, bright_desc = resolve_bright_threshold(
-            bright_policy, adjfibindx, median_sky, thresh_bright_faint)
-        mskflux = if isnothing(bright_thresh)
-            falses(length(median_sky))          # split off: nothing is bright
-        else
-            .!expand_msk(median_sky .< bright_thresh, rad=4)
-        end
+        mskflux, bright_desc, bright_thresh = resolve_bright_mask(
+            bright_policy, adjfibindx, median_sky, submsk, thresh_bright_faint)
         bright_frac = count(mskflux) / length(mskflux)
+        split_off = !isnothing(bright_policy) && get(bright_policy, :mode, :absolute) == :off
         check_bright_fraction(bright_frac, adjfibindx, bright_thresh, bright_desc;
-            bounds=bright_frac_bounds, guard=bright_guard, split_off=isnothing(bright_thresh))
+            bounds=bright_frac_bounds, guard=bright_guard, split_off=split_off)
         mskflux_big = zeros(Bool,length(submsk))
         mskflux_big[submsk].=mskflux
 

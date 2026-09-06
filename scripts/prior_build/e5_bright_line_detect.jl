@@ -74,6 +74,56 @@ function running_spread_nan(x::AbstractVector, window::Int; kind::Symbol=:mad)
     return out
 end
 
+
+"""
+    running_spread_fast(x, window; kind=:mad, stride=50) -> Vector{Float64}
+
+Running robust spread evaluated on a coarse grid (every `stride` pixels) and linearly
+interpolated. The quantity it estimates -- the local noise/throughput envelope -- varies
+smoothly over hundreds of pixels, so the coarse grid is faithful while being ~`stride`x
+cheaper than the per-pixel version (which is prohibitive at window ~1000).
+"""
+function running_spread_fast(x::AbstractVector, window::Int; kind::Symbol=:mad, stride::Int=50)
+    n = length(x)
+    r = max(window ÷ 2, 1)
+    nodes = unique(vcat(collect(1:stride:n), n))
+    vals = fill(NaN, length(nodes))
+    buf = Float64[]
+    for (t, i) in enumerate(nodes)
+        empty!(buf)
+        @inbounds for j in max(1, i - r):min(n, i + r)
+            v = x[j]
+            isfinite(v) && push!(buf, v)
+        end
+        length(buf) < 5 && continue
+        if kind == :mad
+            m = median(buf)
+            vals[t] = 1.4826 * median(abs.(buf .- m))
+        else
+            vals[t] = (quantile(buf, 0.75) - quantile(buf, 0.25)) / 1.349
+        end
+    end
+    # linear interpolation over the finite nodes
+    out = fill(NaN, n)
+    good = findall(isfinite, vals)
+    isempty(good) && return out
+    for idx in 1:(length(good)-1)
+        a, b = good[idx], good[idx+1]
+        i0, i1 = nodes[a], nodes[b]
+        v0, v1 = vals[a], vals[b]
+        @inbounds for i in i0:i1
+            out[i] = v0 + (v1 - v0) * (i - i0) / max(i1 - i0, 1)
+        end
+    end
+    @inbounds for i in 1:nodes[good[1]]
+        out[i] = vals[good[1]]
+    end
+    @inbounds for i in nodes[good[end]]:n
+        out[i] = vals[good[end]]
+    end
+    return out
+end
+
 "binary dilation of a Bool vector by `rad` pixels (grow TRUE regions)."
 function dilate_msk(msk::AbstractVector{Bool}, rad::Int)
     rad <= 0 && return copy(msk)
