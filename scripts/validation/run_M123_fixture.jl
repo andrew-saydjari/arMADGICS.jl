@@ -24,6 +24,7 @@ include(joinpath(src_dir, "src/utils.jl"))
 include(joinpath(src_dir, "src/gridSearch.jl"))
 include(joinpath(src_dir, "src/componentAndPosteriors.jl"))
 include(joinpath(src_dir, "src/fileNameHandling.jl"))
+isfile(joinpath(src_dir, "src/priors.jl")) && include(joinpath(src_dir, "src/priors.jl")) # integration branch
 include(joinpath(src_dir, "src/ingest.jl"))
 include(joinpath(src_dir, "src/lowRankPrescription.jl"))
 include(joinpath(src_dir, "src/marginalizeEW.jl"))
@@ -46,21 +47,31 @@ lvl3 = -3:1//10:3
 slvl_tuple = (lvl1, lvl2, lvl3)
 logUniWaveAPOGEE = 10 .^ range((start = 4.179 - 125 * 6.0e-6), step=6.0e-6, length=8575 + 125)
 
-prior_dict = Dict{String,String}()
-prior_dict["chebmsk"] = prior_dir * "2025_07_31/prior_dump/chebmsk_exp.h5"
-prior_dict["starCont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
-prior_dict["starLines_refLSF"] = prior_dir * "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5"
-
-## load priors exactly as multi_spectra_batch does
-f = h5open(prior_dict["starLines_refLSF"]); V_starlines_refLSF = read(f["Vmat"]); close(f)
-f = h5open(prior_dict["chebmsk"]); chebmsk_exp = read(f["chebmsk_exp"]); close(f)
-skymsk_bright = chebmsk_exp
-skymsk_faint = chebmsk_exp
-skymsk = chebmsk_exp
-f = h5open(prior_dict["starCont"]); V_starcont = read(f["Vmat"]); close(f)
-V_starlines = V_starlines_refLSF # hack (matches production)
-msk_starCor = ones(Bool, length(chebmsk_exp))
-prior_vec = (chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor)
+## load priors exactly as multi_spectra_batch does.
+# On the integration branch (src/priors.jl present) the shared production loader is
+# used per fiber; on pre-integration main the old inline loading is replicated so the
+# identical driver runs baseline and staged code.
+if isdefined(Main, :load_fiber_priors)
+    prior_dict = build_prior_dict(prior_dir)
+    println("using src/priors.jl loader; starCont prefix (apo): ", prior_dict["starCont_apo"])
+    prior_vec_for(fib) = load_fiber_priors(prior_dict, fib)
+else
+    prior_dict = Dict{String,String}()
+    prior_dict["chebmsk"] = prior_dir * "2025_07_31/prior_dump/chebmsk_exp.h5"
+    prior_dict["starCont"] = prior_dir * "2025_07_31/prior_dump/APOGEE_starcont_svd_60_rough.h5"
+    prior_dict["starLines_refLSF"] = prior_dir * "2025_07_31/prior_dump/APOGEE_stellar_kry_50_subpix_th_22500.h5"
+    println("using pre-integration inline loading; starCont prior: ", prior_dict["starCont"])
+    f = h5open(prior_dict["starLines_refLSF"]); V_starlines_refLSF = read(f["Vmat"]); close(f)
+    f = h5open(prior_dict["chebmsk"]); chebmsk_exp = read(f["chebmsk_exp"]); close(f)
+    skymsk_bright = chebmsk_exp
+    skymsk_faint = chebmsk_exp
+    skymsk = chebmsk_exp
+    f = h5open(prior_dict["starCont"]); V_starcont = read(f["Vmat"]); close(f)
+    V_starlines = V_starlines_refLSF # hack (matches production)
+    msk_starCor = ones(Bool, length(chebmsk_exp))
+    prior_vec_const = (chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor)
+    prior_vec_for(fib) = prior_vec_const
+end
 
 ## fibers to run (see build_M123_fixture.jl)
 run_fibers = [85, 86, 87, 88, 89, 90, 92, 93, 100, 101, 103]
@@ -107,7 +118,7 @@ for (i, fib) in enumerate(run_fibers)
     t0 = time()
     local out
     try
-        out = pipeline_single_spectra(argtup, prior_vec)
+        out = pipeline_single_spectra(argtup, prior_vec_for(fib))
         outs[i] = out
         status[i] = "ok"
     catch e

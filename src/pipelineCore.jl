@@ -10,7 +10,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
     adjfiberindx = argtup.adjfiberindx
 
     # V_skycont,chebmsk_exp,V_skyline_bright,V_skyline_faint,skymsk_bright,skymsk_faint,skymsk,V_starcont,V_starlines_refLSF, V_starlines, msk_starCor, V_dib_lst, V_dib_soft_lst, V_dib_noLSF_soft_lst = prior_vec
-    chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor = prior_vec
+    chebmsk_exp, skymsk_bright, skymsk_faint, skymsk, V_starcont, V_starlines_refLSF, V_starlines, msk_starCor, V_skycont, V_skyline_faint = prior_vec
 
     # M2: defaults so a failure record with correct shapes can be built even if
     # ingest itself throws (missing file, malformed almanac entry, ...)
@@ -31,8 +31,12 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         # This could/should shift to a per night preprocessing
         # Get Sky Prior (M-SKY: guarded against bad sky fibers; skyBit records
-        # exclusions / skipped sky-line component — bit codes in src/ingest.jl)
-        nSkyFibers, meanLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit = getSkyRough(reduxBase, tele, mjd, expnum, almanacFile)
+        # exclusions / skipped sky-line component — bit codes in src/ingest.jl).
+        # Prior-based sky path (E5 wiring): each sky fiber on the exposure is
+        # decomposed into continuum + lines against THIS fiber's per-fiber priors;
+        # meanLocSky/VLocSky model the local sky continuum (previously zeroed:
+        # "hack and ignores VLocSky") and meanLocSkyLines/VLocSkyLines the lines.
+        nSkyFibers, meanLocSky, VLocSky, meanLocSkyLines, VLocSkyLines, msk_local_skyLines, skyBit = getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyline_faint, V_skycont)
         skyscale0 = nanzeromedian(meanLocSky)
 
         # Get the Exposure (Visit) Spectrum
@@ -67,8 +71,8 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         if skyLines_off
             meanLocSkyLines .= 0
             VLocSkyLines .= 0
-            V_skyline_bright .= 0
-            V_skyline_faint .= 0
+            # (E5: no V_skyline_bright exists; V_skyline_faint enters solves only
+            # through the sky decomposition, already reflected in the vectors above)
         end
 
         # Make RV Mask for DD Model (else leave as simplemsk)
@@ -99,15 +103,14 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         # V_skyline_tot_r = hcat(V_skyline_bright_r,V_skyline_faint_r)
         V_skyline_tot_c = V_skyline_faint_c
         V_skyline_tot_r = V_skyline_faint_r
-        # V_locSky_c = VLocSky
-        # V_locSky_r = V_locSky_c[rvmsk,:]
+        V_locSky_c = VLocSky
+        V_locSky_r = V_locSky_c[rvmsk, :]
         V_starCont_c = abs(starscale0) * V_starcont
         V_starCont_r = V_starCont_c[rvmsk, :]
 
         ## Solve RV of Star
         # compute stellar continuum to modify stellar line prior
-        # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
-        Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
+        Vcomb_skylines = hcat(V_skyline_tot_r, V_locSky_r, V_starCont_r)
         Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
         x_comp_lst = deblend_components_all_asym(Ctotinv_skylines, Xd_obs, (V_starCont_r,), (V_starCont_c,))
 
@@ -121,8 +124,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         # V_starCont_r = V_starCont_c[rvmsk,:]
 
         # now take out the skylines to be included in the scanning
-        # Vcomb_cur = hcat(V_locSky_r,V_starCont_r);
-        Vcomb_cur = V_starCont_r
+        Vcomb_cur = hcat(V_locSky_r, V_starCont_r)
         Ctotinv_cur = LowRankMultMatIP([Ainv, Vcomb_cur], wood_precomp_mult_mat([Ainv, Vcomb_cur], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
 
         # compute delta chi2 for adding skylines (helps normalize the joint chi2 below with starLines)
@@ -171,12 +173,11 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         # V_skyline_bright_r = V_skyline_bright_c[simplemsk,:]
         V_skyline_faint_r = V_skyline_faint_c[finalmsk, :]
         V_skyline_tot_r = V_skyline_faint_r
-        # V_locSky_r = V_locSky_c[finalmsk,:]
+        V_locSky_r = V_locSky_c[finalmsk, :]
         V_starCont_c = abs(starscale1) * V_starcont
         V_starCont_r = V_starCont_c[finalmsk, :]
 
-        # Vcomb_skylines = hcat(V_skyline_tot_r,V_locSky_r,V_starCont_r);
-        Vcomb_skylines = hcat(V_skyline_tot_r, V_starCont_r)
+        Vcomb_skylines = hcat(V_skyline_tot_r, V_locSky_r, V_starCont_r)
         Ctotinv_skylines = LowRankMultMatIP([Ainv, Vcomb_skylines], wood_precomp_mult_mat([Ainv, Vcomb_skylines], (size(Ainv, 1), size(V_starlines, 2))), wood_fxn_mult, wood_fxn_mult_mat!)
 
         x_comp_lst = deblend_components_all(Ctotinv_skylines, Xd_obs, (V_starCont_r,))
@@ -192,13 +193,9 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         # do a component save without the 15273 DIB
         # the extra Vstarlines_r is duplicated work if a pure dd model, but helps compare flux conservation in both cases
-        # x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs, 
-        #     (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
-        #     (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
-        # )
         x_comp_lst = deblend_components_all_asym_tot(Ctotinv_fut, Xd_obs,
-            (A, V_skyline_faint_r, V_skyline_faint_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
-            (A, V_skyline_faint_r, V_skyline_faint_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
+            (A, V_skyline_faint_r, V_locSky_r, V_starCont_r, V_starlines_r, V_starlines_r, V_starlines_r),
+            (A, V_skyline_faint_r, V_locSky_c, V_starCont_c, V_starlines_ru, V_starlines_c, I),
         )
 
 
@@ -208,7 +205,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         push!(x_comp_out, nanify(x_comp_lst[1], finalmsk)) #residuals
         # push!(x_comp_out,nanify(x_comp_lst[2][skymsk_bright[finalmsk]],finalmsk .& skymsk_bright)) #bright sky lines
         push!(x_comp_out, nanify(x_comp_lst[2][skymsk_faint[finalmsk]] .+ meanLocSkyLines[finalmsk.&skymsk_faint], finalmsk .& skymsk_faint)) #faint sky lines
-        push!(x_comp_out, nanify(0 .* x_comp_lst[3][chebmsk_exp] .+ meanLocSky[chebmsk_exp], chebmsk_exp)) #sky continuum #hacked to skylines times zero
+        push!(x_comp_out, nanify(x_comp_lst[3][chebmsk_exp] .+ meanLocSky[chebmsk_exp], chebmsk_exp)) #sky continuum (V_locSky component + local mean; un-hacked)
         push!(x_comp_out, nanify(x_comp_lst[4][chebmsk_exp], chebmsk_exp)) #star continuum
         push!(x_comp_out, x_comp_lst[6:end]...) # starLines, starlines coefficients, and totchi2
         push!(x_comp_out, apVisit_from_components(fspec, x_comp_out[3], x_comp_out[4], x_comp_out[5], finalmsk, starscale1)) #apVisit analog (M3: continuum-floored)
