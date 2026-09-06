@@ -7,8 +7,13 @@
 #      method signature exposes no threshold knob. The split is computed inside
 #      build_skyLines only.
 #  (2) EMPIRICAL: rebuild skyCont from the same samples into a scratch dir and assert
-#      the product is BITWISE identical (Vmat and λv) to the shipped one in built/.
-#      Determinism + threshold-independence => the existing files are reusable as-is.
+#      the product matches the shipped one in built/ up to SVD GAUGE, i.e. eigenvalues
+#      to rtol and leading subspaces to a principal-angle tolerance.
+#      NOT bitwise: measured on this build, an SVD rebuild flips the sign of ~1/3 of
+#      the basis columns run-to-run (f001: 11/30 columns; sign-corrected residual
+#      2.2e-08, eigenvalues 1.2e-10 rel, spans 1.7e-06 deg). Column sign (and rotation
+#      within a degenerate subspace) is arbitrary gauge, so any prior-vs-prior check --
+#      here or in E6 regression -- must be gauge-invariant or it reports false diffs.
 #
 # Usage: julia --project=<arM-E5b> e5_assert_skycont_invariant.jl [adjfib ...]
 #        (default: one APO and one LCO fiber that are already built)
@@ -19,6 +24,12 @@ const OUT = get(ENV, "E5_OUT", "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_04/
 const CHIPGAP = get(ENV, "E5_CHIPGAP", "/mnt/ceph/users/sdssv/work/asaydjari/2026_04_25/StarContChipGapMsk.h5")
 
 include(ARM * "scripts/prior_build/build_sky_defs.jl")
+
+# gauge-invariant tolerances: ~4 orders above the measured noise floor, and far below
+# any real basis change (the screens drop-variant moves spans by 0.2-89 degrees)
+const LAM_RTOL = 1e-6
+const ANGLE_TOL_DEG = 1e-3
+const COL_RTOL = 1e-5
 
 failures = String[]
 
@@ -64,17 +75,32 @@ for adjfib in fibers
         chipgap_msk_path=CHIPGAP, out_dir=scratch, nsub=30)
     V1 = h5read(ship, "Vmat"); V2 = h5read(fresh, "Vmat")
     l1 = h5read(ship, "λv"); l2 = h5read(fresh, "λv")
-    okV = size(V1) == size(V2) && V1 == V2
-    okl = l1 == l2
-    @printf("(2) EMPIRICAL f%s: Vmat bitwise identical=%s  λv bitwise identical=%s  (maxabs dV=%.3e)\n",
-        n, okV, okl, size(V1) == size(V2) ? maximum(abs.(V1 .- V2)) : NaN)
-    (okV && okl) || push!(failures, "EMPIRICAL: skyCont rebuild differs for f$n")
+    if size(V1) != size(V2) || length(l1) != length(l2)
+        push!(failures, "EMPIRICAL: skyCont shape mismatch for f$n")
+        continue
+    end
+    dlam = maximum(abs.(l1 .- l2) ./ max.(abs.(l1), 1e-300))
+    relsign = [begin
+        a = view(V1, :, j); b = view(V2, :, j)
+        min(norm(a .- b), norm(a .+ b)) / max(norm(a), 1e-300)
+    end for j in 1:size(V1, 2)]
+    nflip = count(j -> norm(view(V1, :, j) .+ view(V2, :, j)) < norm(view(V1, :, j) .- view(V2, :, j)),
+        1:size(V1, 2))
+    k = min(30, size(V1, 2))
+    Q1 = Matrix(qr(V1[:, 1:k]).Q); Q2 = Matrix(qr(V2[:, 1:k]).Q)
+    angle = acosd(clamp(minimum(svdvals(transpose(Q1) * Q2)), 0, 1))
+    ok = (dlam < LAM_RTOL) && (angle < ANGLE_TOL_DEG) && (maximum(relsign) < COL_RTOL)
+    @printf("(2) EMPIRICAL f%s: dλ_rel=%.3e  span(k=%d) angle=%.3e deg  sign-corrected col diff max=%.3e  (%d/%d cols sign-flipped) -> %s\n",
+        n, dlam, k, angle, maximum(relsign), nflip, size(V1, 2), ok ? "MATCH (up to SVD gauge)" : "DIFFERS")
+    ok || push!(failures, "EMPIRICAL: skyCont rebuild differs beyond gauge for f$n (dλ=$dlam, angle=$angle deg, col=$(maximum(relsign)))")
 end
 rm(scratch, recursive=true, force=true)
 
 println()
 if isempty(failures)
     println("ASSERTION PASSED: skyCont products are threshold-policy invariant and reusable")
+    println("  (static: build_skyCont cannot see the threshold; empirical: rebuild matches")
+    println("   the shipped product up to SVD sign/rotation gauge, within tolerances)")
     println("  => a bright/faint threshold rebuild must redo skyLines ONLY; the existing")
     println("     APOGEE_skycont_svd_30_fNNN.h5 files are valid under options A/B/C/D alike.")
 else
