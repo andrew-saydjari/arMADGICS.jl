@@ -12,7 +12,10 @@ set_theme!(black_latexfonts)
 CairoMakie.disable_mime!("svg", "pdf", "text/html")
 
 e5_out = get(ENV, "E5_OUT", "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_04/prior_outputs/sky_pass1")
-plot_dir = get(ENV, "E5_PLOTDIR", "/mnt/home/asaydjari/ceph/working/2026_09_04/plots/e5_sky")
+# NOTE: this must be the sdssv GROUP ceph, not ~/ceph. `~/ceph` is a symlink to
+# /mnt/ceph/users/asaydjari (the personal ceph), which is served under a DIFFERENT URL
+# prefix -- figures written there 404 at the .../sdsswork/... links we hand out.
+plot_dir = get(ENV, "E5_PLOTDIR", "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_04/plots/e5_sky")
 old_prior_dir = get(ENV, "E5_OLD_PRIORS", "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/prior_dump/sky_priors")
 qa_fibers = [parse(Int, t) for t in split(get(ENV, "E5_QA_FIBERS", "10,76,295,351,519,460"), ",")]
 mkpath(plot_dir)

@@ -124,6 +124,22 @@ let hosts = Dict(w => remotecall_fetch(gethostname, w) for w in workers())
                              "--ntasks-per-node is set in the sbatch header.")
         println("placement OK: $got/$want allocated nodes carry workers"); flush(stdout)
     end
+    # WORKER-COUNT assertion (added 2026-09-07 alongside the SLURM_NTASKS bugfix in
+    # submit_E5_sky_rebuild_thresh.sh). The host check above is necessary but NOT
+    # sufficient: it counts distinct HOSTS, so a pool sized 2x the allocation still
+    # lands on all N nodes and passes cleanly. That is exactly what an over-set
+    # SLURM_NTASKS produced (cores-per-node * nodes instead of tasks-per-node * nodes),
+    # and at the measured 19 GB/worker a 2x pool is an OOM, not merely a slowdown.
+    if use_slurm && haskey(ENV, "SLURM_NTASKS_PER_NODE")
+        tpn = parse(Int, ENV["SLURM_NTASKS_PER_NODE"])
+        for h in sort(collect(keys(byhost)))
+            n_h = length(byhost[h])
+            n_h == tpn || error("WORKER COUNT FAILURE: host $h carries $n_h workers but the header " *
+                                "says --ntasks-per-node=$tpn. SLURM_NTASKS must equal the allocation's " *
+                                "TASK count (srun takes its -n from it), not its CORE count.")
+        end
+        println("worker count OK: $tpn workers/node on every node ($(nworkers()) total)"); flush(stdout)
+    end
 end
 
 @everywhere begin

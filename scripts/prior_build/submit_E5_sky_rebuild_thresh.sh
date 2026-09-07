@@ -97,8 +97,25 @@
 # distribution: it costs nothing and still gives restart/resume safety, skip-if-built, and
 # protection against an accidentally overlapping run.
 # ------------------------------------------------------------------------------
-SLURM_NTASKS=$(($SLURM_CPUS_ON_NODE * $SLURM_NNODES))
-export SLURM_NTASKS
+# SLURM_NTASKS is what sizes the worker pool: SlurmManager() reads ENV["SLURM_NTASKS"]
+# and then runs a bare `srun ... --worker`, which ALSO takes its -n from SLURM_NTASKS
+# (srun(1): "SLURM_NTASKS   Same as -n, --ntasks"). It must therefore equal the number of
+# TASKS in the allocation, not the number of CORES.
+#
+# BUGFIX 2026-09-07: this line was inherited verbatim from submit_priors.sh /
+# submit_E5_sky_build.sh, whose header is `--nodes=1` with NO --ntasks-per-node. THERE
+# sbatch sets SLURM_NTASKS=1 and CPUS_ON_NODE*NNODES is the correct, load-bearing way to
+# get one worker per core -- do NOT "fix" it in those scripts.
+# HERE the header sets --ntasks-per-node=48 --cpus-per-task=2, so sbatch already computes
+# SLURM_NTASKS correctly (MEASURED, job 6995922: NumCPUs=672 NumTasks=336 CPUs/Task=2) --
+# and the inherited line overwrote 336 with 96*7 = 672, exactly 2x. Consequences: srun is
+# asked for 672 tasks x 2 CPUs = 1344 CPUs against the 672 allocated, so step creation
+# fails; and SlurmManager waits to connect to 672 workers that cannot exist. The
+# worker-PLACEMENT assertion does NOT catch this -- it counts distinct HOSTS (still 7),
+# not workers, which is why the count assertion below was added alongside this fix.
+# Derived from the header quantities so it stays correct for any --nodes /
+# --ntasks-per-node pair (see the 5-node and icelake variants).
+export SLURM_NTASKS=$(( ${SLURM_NTASKS_PER_NODE:-48} * ${SLURM_NNODES:-1} ))
 env | grep SLURM | while read -r line; do
     echo "$line"
 done
