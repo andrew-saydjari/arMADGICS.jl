@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+out/
+status/
+shards/
+slurm_logs/
+figures*/
+*.h5
+*.npz
+*.pkl
+*.fits
+support_*.json
