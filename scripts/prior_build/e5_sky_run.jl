@@ -158,6 +158,27 @@ using LibGit2
 git_branch, git_commit, git_clean = initalize_git(proj_path)
 println("branch=$git_branch commit=$git_commit clean=$git_clean"); flush(stdout)
 
+# BUGFIX 2026-09-07: resolve the threshold policy HERE -- as soon as
+# e5_sky_pass1_defs.jl is loaded and BEFORE built_dir is passed to the workers.
+# Previously the policy was parsed inside the build stage, long after built_dir had
+# been computed at the top of this file with the placeholder policy_tag=="legacy".
+# built_dir therefore stayed "<e5_out>/built" for EVERY policy, so a policy rebuild
+# would have found all 600 baseline products already present, reported
+# done_already=600, and exited having built nothing -- a silent no-op rebuild that
+# burns the whole allocation while looking like a success (the same failure CLASS as
+# finding #35, which is what this rebuild exists to fix). Caught before firing.
+bright_policy, policy_tag = e5_parse_thresh_policy(thresh_policy_spec)
+built_dir = joinpath(e5_out, get(ENV, "E5_BUILT_DIR",
+    unscreened ? "built_unscreened" :
+    policy_tag == "legacy" ? "built" : "built_" * policy_tag))
+println("threshold policy spec=$thresh_policy_spec tag=$policy_tag -> built_dir=$built_dir")
+if policy_tag != "legacy" && !unscreened && basename(built_dir) == "built"
+    error("e5_sky_run: policy '$thresh_policy_spec' (tag $policy_tag) resolved to the " *
+          "BASELINE built/ dir. A non-legacy policy must never write there. " *
+          "Unset E5_BUILT_DIR or point it at a policy-tagged directory.")
+end
+flush(stdout)
+
 @passobj 1 workers() reduxBase
 @passobj 1 workers() almanacFile
 @passobj 1 workers() list_dir
@@ -263,8 +284,8 @@ elseif stage == "decompose"
 
 elseif stage == "build"
     mkpath(built_dir)
-    # resolve the threshold policy now that the defs are loaded on all workers
-    bright_policy, policy_tag = e5_parse_thresh_policy(thresh_policy_spec)
+    # policy + built_dir were resolved right after the includes (see BUGFIX note above),
+    # so built_dir is already policy-tagged and has been passed to the workers.
     println("build: threshold policy spec=$thresh_policy_spec tag=$policy_tag guard=$bright_guard_str out=$built_dir")
     if policy_tag != "legacy" && !unscreened
         nlink = e5_link_skycont(joinpath(e5_out, "built"), built_dir)
