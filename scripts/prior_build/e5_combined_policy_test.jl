@@ -35,7 +35,7 @@ const SC = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_04/prior_outputs/sky_pa
 const TESTFIB = [1, 10, 76, 150, 295, 300, 301, 388, 450, 519, 570, 600]
 
 nfail = 0
-for spec in ["combined", "combined:union", "combined:majority", "combined:apo_drop12"]
+for spec in ["combined", "combined:telemaj_union", "combined:majority", "combined:union"]
     pol, tag = e5_parse_thresh_policy(spec)
     ref = Bool.(h5read(pol[:path], "mask_" * pol[:variant]))
     @printf("\n=== %-24s tag=%-22s (%d px in the combined mask)\n", spec, tag, count(ref))

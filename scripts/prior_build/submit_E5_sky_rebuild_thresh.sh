@@ -18,10 +18,10 @@
 #
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "<policy>"   # one 7-node job
 #
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:majority"  # RECOMMENDED (2026-09-07)
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:union"     # AKS's "most conservative"
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:drop12"    # AKS's "reject 1-2 fibers"
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:telemaj_or"  # per-telescope, OR'd
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:telemaj_union" # AKS 2026-09-07
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:majority" # POOLED (superseded)
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:union"   # "most conservative"
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:drop12"  # "reject 1-2 fibers"
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "linedetect"      # per-FIBER (superseded)
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:35,8"        # (A) match DR17 ~8.3% bright
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:150,40"      # (B) physical bright lines, ~5%
@@ -32,11 +32,25 @@
 # detector is run per fiber, and the 600 per-fiber masks are then COMBINED into ONE
 # fiber-independent mask, so the same wavelengths are masked as bright on every fiber.
 # The combined mask is a PRECOMPUTED ARTIFACT (E5_BRIGHT_COMBINED below), built by
-# scripts/prior_build/e5_bright_combine.jl; the build only reads it. `:VAR` selects the
-# combination rule; bare "combined" == "combined:majority" (>=300 of 600 fibers), which is
-# the MEASURED optimum against DR17 (mean pixel IoU 0.937 vs 0.826 for union, 0.861 for
-# drop12) and matches DR17's deployed bright fraction most closely (8.06%/8.09% vs DR17's
-# 8.35%/8.15%). Prefer the EXPLICIT ":majority" form so the job log records the choice.
+# scripts/prior_build/e5_bright_combine.jl + e5_bright_validity.jl; the build only reads
+# it. `:VAR` selects the combination rule; bare "combined" == "combined:telemaj_union".
+#
+# telemaj_union (AKS 2026-09-07: "averaging over the masks per telescope and then taking a
+# straight union of apo and LCO") combines WITHIN each telescope first -- a pixel is bright
+# if >=50% of that telescope's ELIGIBLE fibers flag it, eligible meaning fibers that
+# actually have valid data at that pixel -- and then ORs the two telescope masks.
+#   * Eligible-normalized, so chip-edge pixels are decided on the evidence of the fibers
+#     that HAVE data there. Under the earlier POOLED rule (nflag>=300 of 600), the 128
+#     LCO-only-coverage pixels could never reach 300 because APO contributes zero there;
+#     9 of them were arithmetically impossible outright. Coverage, not evidence, decided.
+#   * Union across telescopes, so a line seen at one site is never voted away by the
+#     other. MEASURED: the pooled rule lost 13 pixels LCO robustly called bright, 12 of
+#     them purely to APO dilution (both sites fully covered, LCO fraction 0.51-0.85, APO
+#     0.00-0.62). All 14 recovered runs adjoin lines the old mask already had.
+# Cost of the union, stated plainly: mean DR17 pixel IoU on APO fibers falls 0.933 ->
+# 0.917, because LCO-specific lines are now masked on APO fibers too and DR17's per-
+# telescope reference does not do that. That is the intended trade, not a regression.
+# Prefer the EXPLICIT ":telemaj_union" form so the job log records the choice.
 #
 # Option (D) needs NO rebuild if the current job finishes: "off" is numerically
 # identical to what the inherited constants already produce (they flag 0 pixels).

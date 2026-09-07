@@ -499,13 +499,18 @@ a rebuild under any option never overwrites products built under another.
   "combined[:VAR]"  DELIVERED default (AKS 2026-09-07): `linedetect` run per fiber, then
                     COMBINED across fibers into ONE fiber-independent mask, read from
                     `E5_BRIGHT_COMBINED`. VAR selects the combination rule; default
-                    `majority` (flagged in >=300 of 600 fibers) — AKS's "lines that
-                    register as bright for many/most of the fibers", and the MEASURED
-                    optimum against DR17 (mean pixel IoU 0.937, on a broad interior
-                    plateau from >=150 to >=540). Also `union` (>=1 fiber, AKS's "most
-                    conservative"), `drop12` (>=3), `q25` (>=150), `telemaj_or` /
-                    `telemaj_and` (per-telescope majorities OR'd / AND'ed), and
-                    `apo_*` / `lco_*` which combine within one telescope only.
+                    `telemaj_union` (AKS 2026-09-07: "averaging over the masks per
+                    telescope and then taking a straight union of apo and LCO").
+                    Within each telescope a pixel is bright if >=50% of that telescope's
+                    ELIGIBLE fibers flag it — eligible, NOT all 300, so a chip-edge pixel
+                    is decided on the evidence of the fibers that actually have data
+                    there instead of being diluted by fibers that never could. The two
+                    telescope masks are then OR'd, so a line seen at one site can never
+                    be voted away by the other.
+                    Superseded / diagnostic variants: `majority` (>=300 of 600, POOLED —
+                    systematically loses LCO-only lines, see COMBINED_BRIGHT_MASK.md §4),
+                    `union` (>=1 fiber), `drop12` (>=3), `q25`, `telemaj_and`,
+                    `apo_*` / `lco_*`.
                     The mask is fiber-independent BY CONSTRUCTION: the same array is
                     intersected with every fiber's own submsk.
 """
@@ -538,7 +543,7 @@ function e5_parse_thresh_policy(spec::AbstractString)
                 :dilation => dil, :cont_window => cw),
             "linedet_sw$(sw)_k$(ktag)_d$(dil)" * (cw == 0 ? "" : "_cw$(cw)")
     elseif spec == "combined" || startswith(spec, "combined:")
-        variant = spec == "combined" ? "majority" : String(spec[10:end])
+        variant = spec == "combined" ? "telemaj_union" : String(spec[10:end])
         path = get(ENV, "E5_BRIGHT_COMBINED", E5_BRIGHT_COMBINED_DEFAULT)
         isfile(path) || error("e5_parse_thresh_policy: combined mask file not found: $path " *
                               "(set E5_BRIGHT_COMBINED, or build it with e5_bright_combine.jl --stage=eval)")
