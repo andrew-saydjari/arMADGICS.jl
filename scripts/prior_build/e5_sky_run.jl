@@ -61,7 +61,10 @@ screen_dir = joinpath(e5_out, "screens")
 # with (or overwrites) the products already in built/.
 thresh_policy_spec = get(ENV, "E5_THRESH_POLICY", "legacy")
 bright_policy, policy_tag = (nothing, "legacy")  # resolved after includes
-bright_guard = Symbol(get(ENV, "E5_BRIGHT_GUARD", "warn"))
+# NOTE: kept as a String, not a Symbol. ParallelDataTransfer's @passobj embeds the value
+# in an assignment Expr, so a bare Symbol (:warn) is re-EVALUATED as a variable name on the
+# worker and dies with UndefVarError. Convert to a Symbol only at the call site.
+bright_guard_str = get(ENV, "E5_BRIGHT_GUARD", "warn")
 bright_frac_bounds = (parse(Float64, get(ENV, "E5_BRIGHT_FRAC_LO", "0.01")),
     parse(Float64, get(ENV, "E5_BRIGHT_FRAC_HI", "0.20")))
 built_default = if unscreened
@@ -80,8 +83,48 @@ println("e5_sky_run stage=$stage out=$e5_out fibers=$(first(fibers)):$(last(fibe
 flush(stdout)
 
 proj_path = dirname(Base.active_project()) * "/"
-addprocs(nworkers_req, exeflags=["--project=$proj_path"])
+
+# Worker allocation. Follows the apMADGICS original (src/prior_build/build_skyLines.jl:9-10,
+# `addprocs(SlurmManager(), exeflags=["--project=..."])`) and arM's port of it
+# (scripts/prior_build/build_skyCont.jl:26-31): SlurmManager spans the WHOLE allocation,
+# so one multi-node job distributes workers across every node. `addprocs(::Int)` spawns
+# LOCAL workers only and silently confines a --nodes=N job to a single node -- the failure
+# mode this script previously had, hence the loud host assertion below.
+#   E5_USE_SLURM = auto (default: Slurm when SLURM_JOB_ID is present) | 1 (force) | 0 (local)
+use_slurm = let v = get(ENV, "E5_USE_SLURM", "auto")
+    v == "1" ? true : v == "0" ? false : haskey(ENV, "SLURM_JOB_ID")
+end
+if use_slurm
+    using SlurmClusterManager
+    addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+else
+    addprocs(nworkers_req, exeflags = ["--project=$proj_path"])
+end
 t_now = now(); println("Worker allocation took $(Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then)))"); t_then = t_now; flush(stdout)
+
+# LOUD placement check: prove the workers really landed on every allocated node.
+# A silent single-node collapse is exactly what went undetected before, so this asserts
+# rather than merely printing.
+let hosts = Dict(w => remotecall_fetch(gethostname, w) for w in workers())
+    byhost = Dict{String,Vector{Int}}()
+    for (w, h) in hosts
+        push!(get!(byhost, h, Int[]), w)
+    end
+    println("worker placement: $(nworkers()) workers on $(length(byhost)) distinct hosts")
+    for h in sort(collect(keys(byhost)))
+        ws = sort(byhost[h])
+        println("  $h: $(length(ws)) workers (ids $(first(ws))..$(last(ws)))")
+    end
+    flush(stdout)
+    if use_slurm && haskey(ENV, "SLURM_JOB_NUM_NODES")
+        want = parse(Int, ENV["SLURM_JOB_NUM_NODES"])
+        got = length(byhost)
+        got == want || error("WORKER PLACEMENT FAILURE: workers landed on $got distinct host(s) but the allocation has $want node(s). " *
+                             "This is the addprocs(::Int) single-node collapse; check that SlurmManager is in use and that " *
+                             "--ntasks-per-node is set in the sbatch header.")
+        println("placement OK: $got/$want allocated nodes carry workers"); flush(stdout)
+    end
+end
 
 @everywhere begin
     using LinearAlgebra
@@ -222,13 +265,13 @@ elseif stage == "build"
     mkpath(built_dir)
     # resolve the threshold policy now that the defs are loaded on all workers
     bright_policy, policy_tag = e5_parse_thresh_policy(thresh_policy_spec)
-    println("build: threshold policy spec=$thresh_policy_spec tag=$policy_tag guard=$bright_guard out=$built_dir")
+    println("build: threshold policy spec=$thresh_policy_spec tag=$policy_tag guard=$bright_guard_str out=$built_dir")
     if policy_tag != "legacy" && !unscreened
         nlink = e5_link_skycont(joinpath(e5_out, "built"), built_dir)
         println("build: reused $nlink existing skyCont priors by symlink (threshold-policy invariant; see e5_assert_skycont_invariant.jl)")
     end
     @passobj 1 workers() bright_policy
-    @passobj 1 workers() bright_guard
+    @passobj 1 workers() bright_guard_str
     @passobj 1 workers() bright_frac_bounds
     # E5 concurrent-build safety: skip-if-built + atomic per-fiber claims so the
     # on-node ccalin051 run and the AKS sbatch job can overlap without ever
@@ -256,7 +299,7 @@ elseif stage == "build"
                 r[:cont_s] = round(time() - t1, digits=1)
                 t1 = time()
                 build_skyLines(adjfib; sample_dir=sample_dir, chipgap_msk_path=chipgap_msk_path,
-                    out_dir=built_dir, bright_policy=bright_policy, bright_guard=bright_guard,
+                    out_dir=built_dir, bright_policy=bright_policy, bright_guard=Symbol(bright_guard_str),
                     bright_frac_bounds=bright_frac_bounds)
                     # GSPICE knobs untouched: usamp_factor=7 etc. defaults
                 r[:lines_s] = round(time() - t1, digits=1)

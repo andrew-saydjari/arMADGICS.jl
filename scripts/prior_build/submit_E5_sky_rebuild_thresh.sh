@@ -1,13 +1,14 @@
 #!/bin/bash
 #SBATCH --partition=cca
-#SBATCH --nodes=1
-#SBATCH --array=0-6
+#SBATCH --nodes=7
+#SBATCH --ntasks-per-node=48
+#SBATCH --cpus-per-task=2
 #SBATCH --constraint=genoa
 
 #SBATCH --mem=0
 #SBATCH --time=4:00:00
 #SBATCH --job-name=ar_E5_sky_rebuild
-#SBATCH --output=slurm_logs/%x_%A_%a.out
+#SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
 # E5 finding #35 REBUILD launcher: rebuild the skyLines priors under a chosen
 # bright/faint threshold policy. Ready to fire for ANY of the four options in
@@ -15,7 +16,7 @@
 # as the first argument (or set E5_THRESH_POLICY before sbatch; the value is
 # re-read here at run time, so it is safe against sbatch's env snapshot):
 #
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "<policy>"   # submits all 7 array tasks
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "<policy>"   # one 7-node job
 #
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "linedetect"      # RECOMMENDED (calibrated)
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:35,8"        # (A) match DR17 ~8.3% bright
@@ -38,25 +39,35 @@
 #  - bright-fraction guard set to ERROR here: a policy that flags outside 1-20% of
 #    pixels stops the build instead of silently producing another no-op.
 #
-# WHY A JOB ARRAY OF 1-NODE TASKS (2026-09-06 resource profile,
-# 2026_09_06/gspice_resource_profile/GSPICE_RESOURCE_REPORT.md):
-#   e5_sky_run.jl uses `addprocs(::Int)`, which spawns LOCAL workers only (apMADGICS
-#   used SlurmManager(); arM does not). So `--nodes=N` would allocate N nodes and use
-#   exactly ONE. Rather than add SlurmManager, we exploit the atomic mkdir-based
-#   per-fiber claims already in place: N independent 1-node array tasks cooperate
-#   through <built_dir>/.claims and behave as one N-node job WITH global dynamic load
-#   balancing (measured: 322 claims, zero collisions). Each task walks the whole fiber
-#   list from a staggered start (E5_FIBER_ROTATE) so they never contend at launch.
+# DISTRIBUTION: SlurmManager, one multi-node job (AKS 2026-09-06).
+# e5_sky_run.jl calls addprocs(SlurmManager()) when SLURM_JOB_ID is set, following the
+# apMADGICS original (src/prior_build/build_skyLines.jl:9-10) and arM's port of it
+# (scripts/prior_build/build_skyCont.jl:26-31). SlurmManager spans the whole allocation,
+# so the 7 nodes requested here are all used. The header MUST therefore set
+# --ntasks-per-node (one Slurm task per Julia worker) and --cpus-per-task=2 (the BLAS
+# threads each worker needs). The script asserts, loudly, that workers land on all 7
+# nodes: addprocs(::Int) would silently confine the job to one node, which is exactly the
+# bug that went undetected in the earlier E5 build.
 #
-# Sizing (all MEASURED): CPU-bound (93.3% of 2 cores/worker, 99.1% user, iowait 0.00);
-# peak RSS 19.0 GB/worker = 9.5 GB/core; no shared working set, so nodes scale cleanly.
-# Rebuild cost is 38.7 min/fiber (not 44.6) because skyCont is symlinked and genuinely
-# skipped by the `if !isfile` checkpoint. 7 nodes x 48 workers = 336 workers => 600
-# fibers in 2 waves => ~1.1-1.6 h at ~89% efficiency. An 8th node buys ZERO wall-clock
-# (still 2 waves) while idling more slots, so 7 is the answer.
-# genoa is REQUIRED, not preferred: 16 GB/core vs rome's 8 GB/core, and the workload
-# needs 9.5 GB/core. If genoa queues badly, --constraint="[genoa|icelake]" is the safe
-# fallback (~1.9 h); NEVER rome.
+# SIZING RATIONALE (measured, 2026-09-06 GSPICE resource profile at
+# 2026_09_06/gspice_resource_profile/GSPICE_RESOURCE_REPORT.md -- keep this with the script):
+#   * CPU-bound: 93.3% of 2 cores/worker, 99.1% user time, iowait 0.00. No shared working
+#     set between fibers, so nodes scale cleanly and I/O is a non-factor.
+#   * Peak RSS 19.0 GB/worker (VmHWM 18.51-19.37, only 4% spread) = 9.5 GB/core.
+#   * genoa is REQUIRED, not preferred: 16 GB/core vs rome's 8 GB/core against a 9.5
+#     GB/core need. 48 workers x 19 GB = 912 GB of genoa's 1538 (59%); the same 48 on a
+#     1024 GB rome node would be 89-93% -- a live OOM risk. NEVER rome.
+#     Safe fallback if genoa queues badly: --constraint="[genoa|icelake]" with
+#     --ntasks-per-node=32 (icelake has 64 cores / 1024 GB), ~1.9 h.
+#   * 48 workers/node x 2 cores = 96 cores = a full genoa node.
+#   * 7 nodes x 48 = 336 workers vs 600 fibers => 2 waves at ~38.7 min/fiber (rebuild cost;
+#     skyCont is symlinked and genuinely skipped) => ~1.1-1.6 h at ~89% efficiency.
+#     An 8th node buys ZERO wall-clock (still 2 waves) while idling more slots, so 7 is
+#     the answer under AKS's effectiveness condition. AKS: "Let's do 7 for that in future."
+#
+# The atomic mkdir .claims/ machinery is KEPT even though SlurmManager now handles
+# distribution: it costs nothing and still gives restart/resume safety, skip-if-built, and
+# protection against an accidentally overlapping run.
 # ------------------------------------------------------------------------------
 SLURM_NTASKS=$(($SLURM_CPUS_ON_NODE * $SLURM_NNODES))
 export SLURM_NTASKS
@@ -107,34 +118,30 @@ export E5_SAMPLE_SUBDIR=samples
 export E5_UNSCREENED=0
 export E5_FIBERS=1:600
 export E5_BUILD_ORDER=asc
+export E5_USE_SLURM=auto
 # 2 BLAS threads per worker is REQUIRED, not a tuning choice: 1 thread x 96 workers is
 # memory-infeasible on genoa at 19 GB/worker.
 export E5_BLAS_THREADS=2
 
-# Worker count is capped by MEMORY as well as cores. The old formula min(cores/2, 48)
-# claimed to be "memory-capped on rome" but was not: 48 workers x 19 GB = 912 GB on a
-# 1024 GB rome node (93%) is a live OOM risk. Derive the cap from real node memory,
-# holding total worker RSS to <= 80% of it at the measured 19 GB/worker peak.
+# Workers now come from the Slurm allocation (one task per worker), so instead of
+# computing a count we VERIFY the allocation is memory-safe at the measured 19 GB/worker
+# peak and refuse to start if it is not.
 PEAK_GB_PER_WORKER=19
+TPN=${SLURM_NTASKS_PER_NODE:-48}
 if [ -n "${SLURM_MEM_PER_NODE:-}" ] && [ "${SLURM_MEM_PER_NODE:-0}" -gt 0 ] 2>/dev/null; then
-    MEM_GB=$(( SLURM_MEM_PER_NODE / 1024 ))          # SLURM reports MB
+    MEM_GB=$(( SLURM_MEM_PER_NODE / 1024 ))
 else
     MEM_GB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
 fi
-MEM_CAP=$(( (MEM_GB * 80 / 100) / PEAK_GB_PER_WORKER ))
-CORE_CAP=$(( SLURM_CPUS_ON_NODE / 2 ))
-NW=$CORE_CAP
-[ "$MEM_CAP" -lt "$NW" ] && NW=$MEM_CAP
-[ "$NW" -gt 48 ] && NW=48
-[ "$NW" -lt 1 ] && NW=1
-export E5_NWORKERS=$NW
-echo "node memory ${MEM_GB} GB -> memory cap ${MEM_CAP} workers; core cap ${CORE_CAP}; using ${E5_NWORKERS} workers x ${E5_BLAS_THREADS} BLAS threads"
-
-# stagger each array task's start point so tasks do not contend for the same claim
-NTASKS=$(( ${SLURM_ARRAY_TASK_COUNT:-1} ))
-TASKID=$(( ${SLURM_ARRAY_TASK_ID:-0} ))
-export E5_FIBER_ROTATE=$(( TASKID * 600 / (NTASKS > 0 ? NTASKS : 1) ))
-echo "array task ${TASKID}/${NTASKS}: fiber rotation ${E5_FIBER_ROTATE}"
+SAFE_TPN=$(( (MEM_GB * 80 / 100) / PEAK_GB_PER_WORKER ))
+echo "node memory ${MEM_GB} GB; ${TPN} workers/node x ${PEAK_GB_PER_WORKER} GB = $(( TPN * PEAK_GB_PER_WORKER )) GB (memory-safe max ${SAFE_TPN})"
+if [ "$TPN" -gt "$SAFE_TPN" ]; then
+    echo "ERROR: --ntasks-per-node=$TPN exceeds the memory-safe maximum $SAFE_TPN for a ${MEM_GB} GB node"
+    echo "       at the measured ${PEAK_GB_PER_WORKER} GB/worker peak. Lower --ntasks-per-node or use genoa."
+    exit 3
+fi
+# E5_NWORKERS is only the OFF-Slurm fallback; under Slurm the allocation decides.
+export E5_NWORKERS=$TPN
 
 # threshold policy: first CLI arg wins, else pre-set E5_THRESH_POLICY, else fail loudly
 export E5_THRESH_POLICY="${1:-${E5_THRESH_POLICY:-}}"
