@@ -10,7 +10,11 @@
 #                           (pass-1c = AKS-approved final cut-policy regeneration,
 #                           supersedes pass1b; identical schema)
 #   ARM_SKY_PRIOR_DIR       E5 per-fiber sky priors (audit items 2/4)
-#                           default <prior_dir>/2026_09_04/prior_outputs/sky_pass1/built
+#                           default <prior_dir>/2026_09_04/prior_outputs/sky_pass1/built_combined_telemaj_union
+#                           (rebuild under the combined bright mask; the older
+#                           `built/` set is the pre-mask baseline, retained for
+#                           comparison only — its leading faint mode is ~99.8%
+#                           a BRIGHT-pixel mode, so do not run pass-1 on it)
 #   ARM_CHIPGAP_MSK         per-telescope chip-gap/cheb mask file (audit item 3)
 #                           default <prior_dir>/2026_04_25/StarContChipGapMsk.h5
 #   ARM_STARLINES_PRIOR_DIR E7 per-fiber TH starLines priors (audit item 2)
@@ -44,7 +48,7 @@ function build_prior_dict(prior_dir)
     # skycont files carry no chebmsk_exp dataset (unlike DR17-era files); the
     # chip-gap mask is a separate input.
     sky_root = get(ENV, "ARM_SKY_PRIOR_DIR",
-        joinpath(prior_dir, "2026_09_04/prior_outputs/sky_pass1/built"))
+        joinpath(prior_dir, "2026_09_04/prior_outputs/sky_pass1/built_combined_telemaj_union"))
     prior_dict["skycont"] = joinpath(sky_root, "APOGEE_skycont_svd_30_f")
     prior_dict["skyLines_faint"] = joinpath(sky_root, "APOGEE_skyline_faint_GSPICE_svd_120_f")
 
