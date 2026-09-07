@@ -16,9 +16,10 @@ Env overrides: `PRIORVIZ_OUT`, `PRIORVIZ_SEED` (default 20260907), `PRIORVIZ_NFI
 to skip the 600-fiber scan. Every run also writes `prior_viz_qa.txt` with the structural
 invariants, the eigenvalue accounting, and any anomalies flagged.
 
-2026-09-07 output (seed 20260907; fibers APO 59/95/124/153/196, LCO 323/330/338/476/585):
-<https://users.flatironinstitute.org/~asaydjari/5mVSWXVXmtfhZTPZGJMBLId2/sdsswork/2026_09_07/plots/pass1_priors/>
+2026-09-07 output (seed 20260907; fibers APO 59/95/124/153/196, LCO 323/330/338/476/585)
+is written to `/mnt/ceph/users/asaydjari/working/2026_09_07/plots/pass1_priors/`
+(internal path, deliberately not linked publicly).
 
-Two findings from that run are written up in the published README: the deployed faint
+Two findings from that run are written up in that output directory: the deployed faint
 sky-line prior spends u2/u3 on chip-edge and bright-line-wing pixels on 513/600 fibers,
 and `src/priors.jl` still defaults `ARM_SKY_PRIOR_DIR` to the pre-rebuild `built/`.
