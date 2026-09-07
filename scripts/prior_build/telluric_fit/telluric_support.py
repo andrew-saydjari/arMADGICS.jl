@@ -381,14 +381,21 @@ def derive_support(list_path, telescope, min_live_frac=0.5, min_exposure_frac=0.
             global_live, min_exposure_frac=min_live_frac, edge_buffer=edge_buffer,
             intervals=intervals,
         )
-        fiber_bounds = []
+        fiber_bounds, n_fallback = [], 0
         for f in range(n_fiber):
             try:
                 fb, _ = bounds_from_live(exp_frac[:, f], min_exposure_frac,
                                          edge_buffer, intervals)
             except RuntimeError:
-                fb = list(global_bounds)   # dead/degenerate fiber: fall back
+                # Dead or degenerate fiber (extra runs from an interior gap, a
+                # run escaping canonical, ...).  Fall back to the global bounds;
+                # the per-exposure ivar mask still excludes its dead pixels.
+                fb = list(global_bounds)
+                n_fallback += 1
             fiber_bounds.append([list(x) for x in fb])
+        if n_fallback:
+            print(f"  per-fiber: {n_fallback}/{n_fiber} fibers fell back to the "
+                  f"global bounds (no clean 3-chip run of their own)")
         bounds = global_bounds
     else:
         bounds, _ = bounds_from_live(exp_frac, min_exposure_frac, edge_buffer, intervals)
