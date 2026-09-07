@@ -77,14 +77,18 @@ struct FiberCheck
     err::String
 end
 
-function check_product(p, nmode)
+# MEASURED schemas, which differ between the two product families and must not be
+# conflated: skyLines (faint / faint-GSPICE) carry Vmat + submsk + λv, while skyCont
+# carries ONLY Vmat + λv -- it has no submsk. Requiring submsk of skyCont reports every
+# fiber as "datasets missing", i.e. a false integrity failure on 600 good symlinks.
+function check_product(p, nmode; want_submsk=true)
     isfile(p) || return (false, "missing")
     try
         h5open(p, "r") do fh
-            haskey(fh, "Vmat") && haskey(fh, "submsk") && haskey(fh, "λv") ||
-                return (false, "datasets missing")
+            haskey(fh, "Vmat") && haskey(fh, "λv") || return (false, "datasets missing")
+            want_submsk && !haskey(fh, "submsk") && return (false, "submsk missing")
             size(fh["Vmat"]) == (8700, nmode) || return (false, "Vmat shape $(size(fh["Vmat"]))")
-            size(fh["submsk"]) == (8700,) || return (false, "submsk shape")
+            want_submsk && size(fh["submsk"]) != (8700,) && return (false, "submsk shape")
             size(fh["λv"]) == (nmode,) || return (false, "λv shape")
             v = read(fh["λv"])
             all(isfinite, v) || return (false, "λv non-finite")
@@ -98,7 +102,7 @@ end
 checks = Vector{FiberCheck}(undef, 600)
 Threads.@threads for f in 1:600
     pc, pf, pg = skycont_name(new, f), skyfaint_name(new, f), skygspice_name(new, f)
-    co, ce = check_product(pc, 30)
+    co, ce = check_product(pc, 30; want_submsk=false)
     fo, fe = check_product(pf, 120)
     go, ge = check_product(pg, 120)
     islk = islink(pc)
