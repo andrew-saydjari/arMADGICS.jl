@@ -190,8 +190,8 @@ end
     write_sky_bundle!(path, key, bundle)
 
 Publish a bundle ATOMICALLY: write to a unique temporary name IN THE SAME DIRECTORY
-(so `rename` stays within one filesystem and is therefore atomic) and `mv` it into
-place. A reader can only ever observe the complete file or no file at all.
+(so the rename stays within one filesystem and is therefore atomic), then `rename(2)`
+it into place. A reader can only ever observe the complete file or no file at all.
 
 Concurrency model: duplicate COMPUTATION is accepted; there is no claim/lock. The
 cached value is a pure function of the key inputs, so every concurrent writer produces
