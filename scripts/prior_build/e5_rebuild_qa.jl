@@ -45,6 +45,12 @@ say(s) = (push!(report, s); println(s); flush(stdout))
 
 wavetarg = 10 .^ range((4.179 - 125 * 6.0e-6), step=6.0e-6, length=8575 + 125)
 
+# submsk is stored as Int64 0/1, NOT Bool (MEASURED: eltype(submsk)==Int64, Vmat is
+# 8700x120 Float64). Coerce on read: an Int64 mask silently becomes an INDEX vector in
+# `V[msk, j]` (BoundsError on the 0s) and `.!msk` is a MethodError, so every mask read
+# goes through here rather than h5read directly.
+readmsk(p) = h5read(p, "submsk") .!= 0
+
 skycont_name(d, f) = joinpath(d, "APOGEE_skycont_svd_30_f" * lpad(f, 3, "0") * ".h5")
 skyfaint_name(d, f) = joinpath(d, "APOGEE_skyline_faint_svd_120_f" * lpad(f, 3, "0") * ".h5")
 skygspice_name(d, f) = joinpath(d, "APOGEE_skyline_faint_GSPICE_svd_120_f" * lpad(f, 3, "0") * ".h5")
@@ -147,7 +153,7 @@ Threads.@threads for f in 1:600
     po, pn = skyfaint_name(base, f), skyfaint_name(new, f)
     (isfile(po) && isfile(pn)) || continue
     try
-        so = h5read(po, "submsk"); sn = h5read(pn, "submsk")
+        so = readmsk(po); sn = readmsk(pn)
         n_old[f] = sum(so); n_new[f] = sum(sn)
         n_removed[f] = sum(so .& .!sn)
         n_added[f] = sum(sn .& .!so)
@@ -236,7 +242,7 @@ for (i, f) in enumerate(qa_fibers)
     isfile(p) || continue
     try
         V = h5read(p, "Vmat")
-        so = h5read(p, "submsk")
+        so = readmsk(p)
         b = so .& bright                       # the pixels this fiber loses
         for j in 1:120
             e = sum(abs2, V[:, j])
@@ -255,6 +261,15 @@ end
 # C3. energy capture + LOW-k principal angles on the COMMON support.
 # Both bases are restricted to the rebuild's faint pixels (a subset of the baseline's),
 # so the comparison is on identical rows. Angles reported only for k<=10.
+#
+# INTERPRET WITH THE RETAINED NORM, reported alongside. C2 measures that the BASELINE
+# modes carry ~99% of their energy on the pixels the new mask removes, so restricting
+# the baseline basis to the common support throws away almost all of its norm; what
+# remains is a small residual, and capture/angle numbers computed against it are
+# correspondingly delicate. A LOW capture here is therefore NOT the SVD gauge trap --
+# it is the real, intended effect of the mask (the baseline basis genuinely never
+# modelled the faint structure). The retained-norm column is what makes that legible,
+# so never quote the capture without it.
 say("")
 say("-- subspace agreement on the common (faint) support --")
 for f in qa_fibers
@@ -263,13 +278,16 @@ for f in qa_fibers
         (isfile(po) && isfile(pn)) || continue
         try
             Vo = h5read(po, "Vmat"); Vn = h5read(pn, "Vmat")
-            sn = h5read(pn, "submsk")
+            sn = readmsk(pn)
             Ao = Vo[sn, :]; An = Vn[sn, :]      # identical rows, common support
+            # how much of each basis SURVIVES the restriction (see note above)
+            keep_o = sum(abs2, Ao[:, 1:10]) / sum(abs2, Vo[:, 1:10])
+            keep_n = sum(abs2, An[:, 1:10]) / sum(abs2, Vn[:, 1:10])
             capn = energy_capture(An, Ao, 10)   # new modes explained by baseline span
             capo = energy_capture(Ao, An, 10)   # baseline modes explained by rebuild span
             a = [acosd(clamp(minimum(princ_angles(Ao, An, k)), 0, 1)) for k in (1, 2, 3, 5, 10)]
-            say(@sprintf("  f%03d %-6s k=10 capture new-in-old %.4f | old-in-new %.4f | angles k=1,2,3,5,10: %s deg",
-                f, tag, capn, capo, join([@sprintf("%.2f", x) for x in a], ", ")))
+            say(@sprintf("  f%03d %-6s retained norm k=10 old %.4f / new %.4f | capture new-in-old %.4f, old-in-new %.4f | angles k=1,2,3,5,10: %s deg",
+                f, tag, keep_o, keep_n, capn, capo, join([@sprintf("%.2f", x) for x in a], ", ")))
         catch err
             say(@sprintf("  f%03d %-6s comparison failed: %s", f, tag, first(sprint(showerror, err), 100)))
         end
