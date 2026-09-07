@@ -45,7 +45,7 @@ ThreadPinning = "811555cd-349b-4f26-b7bc-1f208b848042"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [sources]
-ApogeeReduction = {rev = "main", url = "https://github.com/andrew-saydjari/ApogeeReduction.jl.git"}
+ApogeeReduction = {path = "/mnt/home/asaydjari/gitcode/worktrees/AR-testbed-20260907"}
 
 [compat]
 ArgParse = "1"
