@@ -21,13 +21,20 @@
 #                           default <prior_dir>/2026_09_05/prior_outputs/starLines_perfiber
 #   ARM_STARLINES_REFLSF_HACK=1  fall back to the pre-E7 refLSF hack
 #                           (V_starlines = V_starlines_refLSF) — regression use only
+#   ARM_PRIOR_SUPPORT_RELTOL     relative-power threshold for the prior-support guard
+#                           in load_fiber_priors (default 1e-2; set to 0 to DISABLE
+#                           the guard for before/after regression comparisons)
 #
 # One further ARM_* variable lives outside this file; listed here so this comment stays
 # the single index of runtime environment overrides:
 #   ARM_SKY_CACHE_DIR       root of the per-exposure sky-bundle cache (src/skyCache.jl).
 #                           UNSET (the default) = no caching, byte-identical behaviour.
-#                           Nothing that cache stores depends on any prior set, so
-#                           repointing any variable above cannot stale it.
+#                           Nothing that cache stores depends on any prior set: every
+#                           cached quantity is computed BEFORE the priors are touched.
+#                           So repointing any variable above — including
+#                           ARM_PRIOR_SUPPORT_RELTOL, whose guard narrows chebmsk_exp
+#                           (and hence skymsk) on LCO fibers — cannot stale a cache
+#                           entry, and the guard needs no cache invalidation.
 
 """
     build_prior_dict(prior_dir)
@@ -105,6 +112,39 @@ function per_fiber_prior_file(prefix, adjfiberindx)
 end
 
 """
+    prior_support_mask(V, msk; reltol=prior_support_reltol())
+
+Pixels of `V` (npix x ncomp, or npix x ncomp x nsub) that carry non-negligible prior
+power, i.e. whose row norm is at least `reltol` times the median row norm over `msk`.
+
+`sum(k, V[i,k]^2) == (V*V')[i,i]` is the prior VARIANCE at pixel i, so the row norm is
+the prior's 1-sigma amplitude there; `reltol=1e-2` therefore rejects pixels whose prior
+variance is below 1e-4 of typical. Such a pixel is not "unconstrained" — it is a
+near-delta prior pinning the component to ~0, which is far worse.
+
+Returns a Bool vector over all npix (pixels outside `msk` are judged on the same
+criterion, and are zero there by construction, so the result is always a subset of the
+built support).
+"""
+function prior_support_mask(V::AbstractArray, msk::AbstractVector{Bool};
+        reltol=prior_support_reltol())
+    npix = size(V, 1)
+    length(msk) == npix || error("prior_support_mask: mask length $(length(msk)) != " *
+        "prior npix $npix")
+    any(msk) || error("prior_support_mask: mask selects no pixels, so there is no " *
+        "reference level to judge prior power against")
+    Vm = reshape(V, npix, :)
+    rownorm = vec(sqrt.(sum(abs2, Vm, dims=2)))
+    ref = median(view(rownorm, msk))
+    isfinite(ref) && ref > 0 || error("prior_support_mask: median in-mask row norm " *
+        "is $ref (prior carries no power on its own mask)")
+    return rownorm .>= reltol * ref
+end
+
+"prior-support guard threshold; 0 disables the guard (see ARM_PRIOR_SUPPORT_RELTOL)."
+prior_support_reltol() = parse(Float64, get(ENV, "ARM_PRIOR_SUPPORT_RELTOL", "1e-2"))
+
+"""
     load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
 
 Load all per-fiber priors for one adjusted fiber index (1-300 apo, 301-600 lco) and
@@ -124,6 +164,13 @@ Masking layout (DR17 consumption pattern, apMADGICS pipeline.jl):
 - `skymsk_bright` is retained in the tuple for layout stability but equals
   `chebmsk_exp` (no per-fiber bright submask exists; the bright component is
   neither modeled nor exported).
+- PRIOR-SUPPORT GUARD: the returned `chebmsk_exp` is the per-telescope mask
+  INTERSECTED with the pixels where the delivered starCont and skyCont priors
+  actually carry power (`prior_support_mask`), so `skymsk` — and hence the
+  pipeline's `simplemsk` — cannot fit a pixel whose prior pins the component to
+  ~0. Drops 67 px on every LCO fiber and 0 px on every APO fiber (APO is
+  bit-identical to the raw mask); see the block comment at the call site for the
+  measurement and `ARM_PRIOR_SUPPORT_RELTOL=0` to disable.
 
 `ddstaronly=true` is refused loudly: the per-fiber DD starLines priors are a
 pass-2 deliverable (the E7 TH files carry no `msk_starCor`; on pre-integration
@@ -191,6 +238,92 @@ function load_fiber_priors(prior_dict, adjfiberindx; ddstaronly=false)
     fname = per_fiber_prior_file(prior_dict["skyLines_faint"], adjfiberindx)
     V_skyline_faint, submsk_faint = h5open(fname) do f
         read(f["Vmat"]), convert.(Bool, read(f["submsk"]))
+    end
+
+    # PRIOR-SUPPORT GUARD (2026_09_07; evidence in <prior_dir>2026_09_07/prior_edge_check/).
+    #
+    # SYMPTOM: 67 in-mask pixels — IDENTICAL on all 300 LCO fibers, 0 on all 300 APO
+    # fibers — carry ~1e-3 of the median starCont/skyCont row norm, i.e. ~1e-6 of the
+    # prior VARIANCE, with a hard ~700-900x STEP (not a rolloff) at px 321/3656/8510:
+    #     276-320 (45 px, blue chip blue edge), 3638-3655 (18 px, green chip blue
+    #     edge), 8511-8514 (4 px, red chip red edge).
+    #
+    # ROOT CAUSE — the mask rule and the signal boundary key off DIFFERENT inputs.
+    # A starCont sample is a product of three factors (sample_starCont.jl:148):
+    #     tellFracSamples[:,i] .* Tfun./median(Tfun) .* (Ksp*(rvec.*bbs))
+    # MEASURED, per factor, at the 67 px:
+    #   * Ksp (LSF matrix): row sums are EXACTLY 1.0 at all 8700 px (lsf.jl:88-97
+    #     renormalizes). Ruled out — it cannot suppress anything.
+    #   * tellFracSamples: value ~0.98 there, so it does NOT suppress. But its
+    #     EXACT-ZERO fraction goes 1.00 (px 265) -> 0.49 (270) -> 0.010 (275) ->
+    #     0.0000 (276). The chipgapmsk rule is "any exact zero among the samples kills
+    #     the pixel", so the mask edge IS this file's exact-zero edge — MEASURED to
+    #     match on BOTH telescopes (lco 276==276, apo 341==341). These are the 2023-era
+    #     files 2026_04_26/outsamptell_lco.jdat and 2026_04_25/outsamptell_apo.jdat.
+    #   * Tfun = exp(Atell*theta): THE SUPPRESSOR. It collapses to ~0.002-0.004 of its
+    #     median blueward of px 321 and steps ~400x to 0.73 at px 321 — and MEASURED,
+    #     px 321 IS THE SAME BOUNDARY ON BOTH TELESCOPES. The telluric transfer
+    #     function simply carries no information below it.
+    # So the two boundaries are set by two DIFFERENT input files, and APO vs LCO is
+    # decided purely by which side of px 321 the mask edge lands on:
+    #     APO mask starts 341 = 20 px REDWARD of 321 -> safely inside support, 0 bad px
+    #     LCO mask starts 276 = 45 px BLUEWARD of 321 -> 45 unsupported px (same at the
+    #                                                    green/red chip edges: 18 + 4)
+    # It is NOT that the LCO detector's usable range differs — the model support edge
+    # is identical. NOT an E3 regression either: the pre-E3 delivered telluric products
+    # (prior_inputs/tellurics_20260220_arjl_domeflats/20260323_lco.h5) give the SAME
+    # px-321 boundary and the same 45 px gap, so this predates the E3 refit.
+    # skyCont is NOT independent corroboration: sky_smooth_fit reconstructs each sample
+    # as V_smooth_c*coeffs with Vcontinuum = the starCont Vmat (sample_sky_defs.jl:61-67,
+    # 144-145), so it inherits this hole verbatim.
+    #
+    # WHY apMADGICS DIDN'T HAVE IT (build_starCont.jl:92 "This should probably go back
+    # to being fiber dependent like I had in apMADGICS"): apMADGICS built chebmsk_exp
+    # PER FIBER from measured per-fiber chip spans (medframes; prior_utils.jl:4-42,
+    # sample_sky.jl:210-213) AND explicitly zeroed its telluric samples outside that
+    # footprint (Vout[msknall,:] .= 0). arM's exp(Atell*theta) is strictly positive
+    # everywhere, so that implicit per-fiber support — and the exact zeros the mask rule
+    # was designed to detect — are gone. generate_poly_prior still exists at
+    # scripts/prior_build/prior_utils.jl:4-42 but is DEAD CODE; no medframes file is
+    # referenced anywhere in this repo.
+    #
+    # WHY THE RUNTIME DOESN'T CATCH IT: the data really is there. MEASURED on
+    # ar1Dunical lco/61127 and 61130: frac(ivar>0)=0.997 and flux 0.63-0.81x the
+    # interior median at these pixels. obscnt likewise counts real resampler COVERAGE
+    # (cntvec .== framecnts, ApogeeReduction ar1D.jl:643-690), so 63 of the 67 sit
+    # inside submsk_faint and skymsk/simplemsk keep them: MEASURED 36-48 entering the
+    # solve in every one of 34 real (fiber, exposure) cases. The prior then pins
+    # starCont/skyCont to ~0 while starLines (rel 1.1) and skyLine_faint (rel 3.2) keep
+    # FULL power, so real continuum is forced into the LINE components. px 8511-8514
+    # additionally sit under a bright sky line (3.6-13.7x the interior median).
+    # The pre-integration prior set did not have this (min in-mask relative power 0.43),
+    # so it is a pass-1 regression, not inherited.
+    #
+    # EFFECT OF THE FIX (lco/61127 exp 11+12, 34 cases; apo/61123+61130, 10 cases):
+    #   SNR>=20: residual chi2 falls on 20 of 20 cases, by 26-95% (median -77%).
+    #   SNR< 20: median +2.7%, i.e. a wash. The 8 cases that rise (all SNR<7, +2.3 to
+    #            +15.3%) are fibers whose RV also jumps 8-66 px between the two runs —
+    #            the RV is not determined at that SNR either way.
+    #   APO:     10 of 10 cases BIT-IDENTICAL (same npix, drv = dchi2 = 0, apVisit equal).
+    #
+    # SELF-RETIRING: the threshold is derived from the delivered Vmat, so this becomes
+    # a no-op the moment the masks/priors are rebuilt over real per-fiber support
+    # (pass-2 task #30). It is deliberately runtime-only — no prior file is modified.
+    # THRESHOLD: the population is bimodal with a ~60x-wide empty band (no pixel in any
+    # of the 600 fibers has relative power in 1e-2..1e-1; APO min is 0.20), so any
+    # reltol in ~3e-3..0.19 yields the identical mask.
+    reltol = prior_support_reltol()
+    if reltol > 0
+        prior_supp = prior_support_mask(V_starcont, chebmsk_exp; reltol=reltol) .&
+                     prior_support_mask(V_skycont, chebmsk_exp; reltol=reltol)
+        ndrop = count(chebmsk_exp .& .!prior_supp)
+        # NEVER silent: silent masking is how this class of bug hid in the first place.
+        if ndrop > 0
+            @info "load_fiber_priors: prior-support guard dropped $ndrop px " *
+                  "(adjfiberindx=$adjfiberindx, $tele_key; $(count(chebmsk_exp)) -> " *
+                  "$(count(chebmsk_exp .& prior_supp)) good px, reltol=$reltol)"
+        end
+        chebmsk_exp = chebmsk_exp .& prior_supp
     end
 
     skymsk_bright = chebmsk_exp # no bright submask exists (see docstring)

@@ -92,7 +92,18 @@ else
     echo "[run_workup] ranks: $RANKS ($RANKS_PER_NODE/node) [explicit WORKUP_RANKS]"
 fi
 
+# Precompile-cache warming (measured rationale and numbers: scripts/lib_julia_warm.sh).
+# Both tiers fan out to many Julia processes that load packages independently: the serial
+# tier via addprocs, and the MPI tier via srun/mpiexec where there is NO head process at all
+# and every rank loads cold by construction. A single serial pass first is the only place
+# that fan-out can be serialised. The MPI tier's warm is placed after `module load` below,
+# because MPI.jl precompiles against the MPI library the modules put on the path.
+# No `+version`: run_workup.sh deliberately calls plain `julia`, so the warmer must use the
+# same default channel rather than pinning a different one (caches are per Julia build).
+source "$(dirname "$WORKUP_DIR")/scripts/lib_julia_warm.sh"
+
 if [ "$TIER" = "serial" ]; then
+    warm_julia_precompile "" "$WORKUP_DIR" "$WORKUP_DIR/workup_serial.jl"
     exec julia --project="$WORKUP_DIR" "$WORKUP_DIR/workup_serial.jl" \
         --rawdir "$RAWDIR" --outdir "$OUTDIR" --nworkers "$RANKS" "$@"
 elif [ "$TIER" != "mpi" ]; then
@@ -133,6 +144,13 @@ export CEPHTWEAKS_LAZYIO=${CEPHTWEAKS_LAZYIO:-1}
 export HDF5_USE_FILE_LOCKING=${HDF5_USE_FILE_LOCKING:-FALSE}
 
 WRITER=("$WORKUP_DIR/workup_mpi.jl" --rawdir "$RAWDIR" --outdir "$OUTDIR" "$@")
+
+# Warm the mpi_env project now that the MPI stack is on the path. Every rank below runs the
+# same top-level `using MPI, HDF5, ...` with no head process to go first, so on a multi-node
+# srun this is a genuine N-way concurrent cold load against one shared depot -- the same
+# shape as the 15 min 3 s phase measured in prior-build job 6995969, just with ranks instead
+# of Distributed workers.
+warm_julia_precompile "" "$MPI_ENV" "$WORKUP_DIR/workup_mpi.jl"
 
 if [ -n "${SLURM_JOB_ID:-}" ] && [ "${SLURM_JOB_NUM_NODES:-1}" -gt 1 ]; then
     echo "[run_workup] multi-node Slurm allocation (${SLURM_JOB_NUM_NODES} nodes) → srun --mpi=pmix --ntasks=$RANKS --ntasks-per-node=$RANKS_PER_NODE"
