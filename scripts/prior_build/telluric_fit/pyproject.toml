@@ -1,0 +1,13 @@
+[project]
+name = "telluric-refit"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "astropy>=8.0.1",
+    "h5py>=3.16.0",
+    "jax[cuda12]>=0.10.2",
+    "matplotlib>=3.11.1",
+    "numpy>=2.4.6",
+    "pandas>=3.0.5",
+    "scipy>=1.17.1",
+]
