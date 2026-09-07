@@ -219,6 +219,29 @@ export E5_BRIGHT_FRAC_LO=0.04
 export E5_BRIGHT_FRAC_HI=0.15
 echo "E5_THRESH_POLICY=$E5_THRESH_POLICY E5_BRIGHT_GUARD=$E5_BRIGHT_GUARD E5_NWORKERS=$E5_NWORKERS"
 
+# PRECOMPILE WARMING (REBUILD_QA.md 7a, MEASURED on the job this script ran, 6995969).
+# The rebuild's worker-startup phase cost "15 minutes, 3 seconds, 532 milliseconds". Cause,
+# from the job log: 224 workers on 7 nodes all started cold and contended for the same
+# precompile pidfiles on the shared GPFS depot --
+#     ApogeeReduction Being precompiled by another process (pid: 1432087, pidfile:
+#     /mnt/home/asaydjari/.julia/compiled/v1.11/ApogeeReduction/....ji.pidfile)
+# 219 of the 224 ended up precompiling ApogeeReduction independently (plus 36x CairoMakie,
+# 26x Optim/NLSolversBase/LineSearches, 33x two ArrayInterface/DifferentiationInterface
+# extensions). Julia reported 92 s for the first worker and 154-171 s for the later ones:
+# the phase gets WORSE as workers are added, because the contention is the cost.
+# ApogeeReduction is not named anywhere in e5_sky_run.jl -- it arrives through
+# `include("src/ingest.jl")`, whose line 5 is `import ApogeeReduction: ...`. That is why the
+# warmer follows the driver's include() graph instead of taking a package list: a list would
+# have missed the one package that caused 219 of the 224 storms.
+# One serial pass here, on the head node, before addprocs, makes every worker hit a warm
+# cache. It also front-runs the assert step below, which paid 55 s of its own precompiling
+# HDF5 in 6995969. MEASURED steady-state cost when the cache is already warm: seconds.
+# Never fatal -- see scripts/lib_julia_warm.sh.
+source "$base_dir/scripts/lib_julia_warm.sh"
+warm_julia_precompile "$julia_version" "$base_dir" \
+    "$base_dir/scripts/prior_build/e5_sky_run.jl" \
+    "$base_dir/scripts/prior_build/e5_assert_skycont_invariant.jl"
+
 print_elapsed_time "assert skyCont is threshold-policy invariant (gates the symlink reuse)"
 julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/e5_assert_skycont_invariant.jl
 

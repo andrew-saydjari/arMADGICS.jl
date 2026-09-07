@@ -86,6 +86,16 @@ export E5_BLAS_THREADS=2
 export E5_NWORKERS=$(( SLURM_CPUS_ON_NODE / 2 < 48 ? SLURM_CPUS_ON_NODE / 2 : 48 ))
 echo "E5_NWORKERS=$E5_NWORKERS E5_BLAS_THREADS=$E5_BLAS_THREADS E5_BUILD_ORDER=$E5_BUILD_ORDER"
 
+# PRECOMPILE WARMING (REBUILD_QA.md 7a). Same driver, same package set, same shared depot as
+# submit_E5_sky_rebuild_thresh.sh, so the same warm applies. This launcher is --nodes=1, so
+# it cannot hit the cross-node pidfile storm that cost job 6995969 15 min 3 s -- but it still
+# fans out to min(cores/2, 48) workers that each load cold, and a cold ApogeeReduction is
+# ~92 s of redundant work per worker even on one node. Rationale and measured numbers:
+# scripts/lib_julia_warm.sh. Never fatal.
+source "$base_dir/scripts/lib_julia_warm.sh"
+warm_julia_precompile "$julia_version" "$base_dir" \
+    "$base_dir/scripts/prior_build/e5_sky_run.jl"
+
 print_elapsed_time "build_skyCont + build_skyLines (E5 pass-1, claims+resume)"
 # ~30-50 min/fiber/worker at 2 BLAS threads; 600 fibers from scratch ~7-8 h at 48 workers
 julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/e5_sky_run.jl --stage=build

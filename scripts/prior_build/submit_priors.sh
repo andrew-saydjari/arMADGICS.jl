@@ -54,6 +54,20 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
+# PRECOMPILE WARMING (REBUILD_QA.md 7a). Every stage below spawns a worker pool that loads
+# packages cold in parallel; MEASURED on job 6995969, 224 such workers contending for the
+# same GPFS precompile pidfiles cost 15 min 3 s of pure startup. One serial pass first fixes
+# it. Rationale and numbers: scripts/lib_julia_warm.sh.
+#
+# This script is a MENU -- which stage runs depends on which line below is uncommented -- so
+# unlike the single-driver launchers there is no one driver to point at. The honest scan set
+# is therefore the whole prior_build directory, whose include graph covers every stage
+# (including sample_Korg.jl's Korg, which is exactly the kind of heavy dependency you do not
+# want N workers precompiling simultaneously). Set AR_WARM_PRECOMPILE=0 to skip it when a
+# run only needs one cheap stage and the cache is known cold for the rest.
+source "$base_dir/scripts/lib_julia_warm.sh"
+warm_julia_precompile "$julia_version" "$base_dir" "$base_dir/scripts/prior_build"
+
 # ----- sequential -----
 # julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/sample_starCont.jl # 58 core-h, 0.6 h on 1 node (96 cores)
 # julia +$julia_version --project=$base_dir $base_dir/scripts/prior_build/build_starCont.jl # 88 core-h, 0.9 h on 1 node (96 cores), 100% cpu usage [OOMag possible with Krylov]
