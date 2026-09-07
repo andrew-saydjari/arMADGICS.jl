@@ -4,7 +4,9 @@ Node ccalin051, nice -n 10, no Slurm. Branch `run/E6-prior-swap`
 (worktree /mnt/home/asaydjari/gitcode/worktrees/arM-E6, off origin/main @ 8d3e8a0,
 E6 commits: 0882c9e builder env overrides, 6f25977 fixture prior-swap arg).
 Plan with pre-registered expected diffs: `E6_PLAN.md` (written before any builds).
-Figures: https://users.flatironinstitute.org/~asaydjari/5mVSWXVXmtfhZTPZGJMBLId2/sdsswork/2026_09_04/plots/e6_regression/
+Figures (fig1-fig7 PNGs + index.html) on disk at
+`/mnt/ceph/users/asaydjari/working/2026_09_04/plots/e6_regression/`
+-- internal path, deliberately not linked publicly.
 Input sha256: `INPUT_SHA256SUMS.txt`. Logs: `build_{old,new}.log`, `fixture_*.log`.
 
 ## What was exercised
