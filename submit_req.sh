@@ -14,6 +14,19 @@
 
 echo $SLURM_JOB_NODELIST
 
+# Warm the precompile cache ONCE, serially, before pipeline.jl spawns its worker pool. This
+# is the launcher with the largest exposure in the repo: SlurmManager sizes the pool from
+# SLURM_NTASKS = 8 nodes x 64 tasks, and `@everywhere` then executes on the head AND all 512
+# workers at once, so every package first touched inside that block is resolved by 513
+# processes simultaneously against one shared depot.
+# MEASURED precedent (prior-build job 6995969, only 224 workers on 7 nodes): 219 of them
+# precompiled ApogeeReduction independently and the phase cost 15 min 3 s; contention gets
+# worse, not better, as workers are added. Rationale and numbers: scripts/lib_julia_warm.sh.
+# The version argument MUST match the `julia +1.11.0` below -- precompile caches are keyed
+# on the exact Julia build, so warming the wrong one is pure cost with no benefit.
+source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/scripts/lib_julia_warm.sh"
+warm_julia_precompile "1.11.0" "./" "./pipeline.jl"
+
 julia +1.11.0 --project="./" pipeline.jl
 
 # Clean up logs and Report Timing
