@@ -135,11 +135,20 @@ Per-fiber chip bounds, p5 / p50 / p95:
 
 Mostly a few px, with long tails (LCO chip 2 start p95 = 6471, 49 px past the
 median).  `--per-fiber` derives and emits an `(N_PIXELS, N_FIBERS)` support and
-applies it through the weights; it is **off by default** — per-fiber support is
-FINDINGS.md section 4 item 4, orthogonal to this fix, and lets a narrow-support
-fiber be fit over the full global support with only the Matern prior holding the
-extrapolation.  The machinery and its tests are here so pass 2 does not have to
-reopen the basis question.
+applies it through the weights (`cinv[f, p] = 0`, exact row selection at no
+memory cost, columns untouched); it is **off by default** — per-fiber support is
+FINDINGS.md section 4 item 4, orthogonal to this fix.  The machinery and its
+tests are here so pass 2 does not have to reopen the basis question.
+
+MEASURED, and the concrete reason it is not ready to ship: a per-fiber LCO fit
+passes G1 and the mode-anchoring tests, but **fails G2 for 49 of 300 fibers**.
+Those are exactly the fibers whose own liveness gives *six* runs rather than
+three — an interior gap inside a chip — so `bounds_from_live` refuses them and
+they fall back to the global bounds, which then claim pixels they do not have.
+Per-fiber support therefore needs a **non-contiguous** support per fiber, i.e.
+apMADGICS's `msknall` from `generate_poly_prior` (which survives in arM as dead
+code), not a per-fiber `[start, stop)` per chip.  That is the pass-2 work item,
+and it is now a measured requirement rather than a guess.
 
 ## 6. The frozen canonical intervals
 

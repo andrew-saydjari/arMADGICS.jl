@@ -120,4 +120,8 @@ Per-fiber caveat: G2 for a per-fiber support must be graded against per-fiber
 liveness (`telluric_support.py --per-fiber --npz`).  Graded against the global
 curve, the per-fiber union legitimately reaches 1-2 px past the
 50%-of-fibers boundary and G2 reports a false failure; `validate_output.py`
-says so rather than silently passing or silently failing.
+says so rather than silently passing or silently failing.  With the correct
+reference, a per-fiber LCO support fails G2 for 49/300 fibers — the ones whose
+liveness has an interior gap, which a per-chip `[start, stop)` cannot express.
+See SUPPORT_REPORT.md section 5; `--per-fiber` is off by default for exactly
+this reason.
