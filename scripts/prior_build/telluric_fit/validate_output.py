@@ -101,33 +101,65 @@ def main():
         print("G2 SKIP  pass --live <npz from telluric_support.py --npz>")
     else:
         z = np.load(args.live)
-        E = z["exposure_frac"]
-        if E.ndim == 2:
-            E = (E >= float(attrs.get("support_min_exposure_frac", 0.5))).mean(axis=1)
+        E_raw = z["exposure_frac"]
         thr = args.min_exposure_frac if args.min_exposure_frac is not None \
             else float(attrs.get("support_min_exposure_frac", 0.5))
-        live = [(a, b) for a, b in _runs(E >= thr) if b - a >= 100]
-        bounds = _runs(sup)
-        bad = []
-        if len(live) != len(bounds):
-            bad.append(("chip count", len(bounds), len(live)))
+        per_fiber = sup_full.ndim == 2
+
+        def grade(support_1d, curve, label):
+            live = [(a, b) for a, b in _runs(curve >= thr) if b - a >= 100]
+            bounds = _runs(support_1d)
+            bad = []
+            if len(live) != len(bounds):
+                bad.append(("chip count", len(bounds), len(live)))
+            else:
+                for c, ((s, e), (a, b)) in enumerate(zip(bounds, live)):
+                    if not (a <= s <= a + eb):
+                        bad.append((c, "start", s, (a, b)))
+                    if not (b - eb <= e <= b):
+                        bad.append((c, "stop", e, (a, b)))
+            return bad, live, bounds
+
+        if per_fiber and E_raw.ndim == 2:
+            # Correct reference for a per-fiber support: each fiber's own curve.
+            n_bad_fib, worst = 0, None
+            for f in range(sup_full.shape[1]):
+                bad, live, _ = grade(sup_full[:, f], E_raw[:, f], f"fiber {f}")
+                if bad:
+                    n_bad_fib += 1
+                    worst = worst or (f, bad)
+            if n_bad_fib:
+                fails.append("G2")
+                print(f"G2 FAIL  {n_bad_fib}/{sup_full.shape[1]} fibers have a "
+                      f"boundary outside their own live region; first: {worst}")
+            else:
+                print(f"G2 PASS  all {sup_full.shape[1]} per-fiber supports "
+                      f"inside their own live region by <= {eb} px")
+            live = []
         else:
-            for c, ((s, e), (a, b)) in enumerate(zip(bounds, live)):
-                if not (a <= s <= a + eb):
-                    bad.append((c, "start", s, (a, b)))
-                if not (b - eb <= e <= b):
-                    bad.append((c, "stop", e, (a, b)))
-        n_edges = 2 * len(live)
-        if bad:
-            fails.append("G2")
-            print(f"G2 FAIL  {len(bad)}/{n_edges} boundaries: {bad}")
-        else:
-            print(f"G2 PASS  {n_edges}/{n_edges} boundaries inside the live "
-                  f"region by <= {eb} px   live={live} support={bounds}")
+            if per_fiber:
+                print("G2 NOTE  the declared support is PER FIBER but --live "
+                      "carries only the global liveness curve.  Grading the "
+                      "per-fiber UNION against the global curve, which is the "
+                      "wrong reference: a union legitimately reaches 1-2 px "
+                      "past the 50%-of-fibers boundary.  Re-derive with "
+                      "--per-fiber --npz for a correct grade.")
+            E = E_raw
+            if E.ndim == 2:
+                E = (E >= thr).mean(axis=1)
+            bad, live, bounds = grade(sup, E, "global")
+            n_edges = 2 * len(live)
+            if bad:
+                fails.append("G2")
+                print(f"G2 FAIL  {len(bad)}/{n_edges} boundaries: {bad}")
+            else:
+                print(f"G2 PASS  {n_edges}/{n_edges} boundaries inside the live "
+                      f"region by <= {eb} px   live={live} support={bounds}")
         off = int((sup & ~np.isin(np.arange(len(sup)),
                                   np.concatenate([np.arange(a, b) for a, b in live])
                                   if live else np.array([], int))).sum())
-        print(f"         support pixels with no measured data: {off}")
+        if live:
+            print(f"         support pixels with no measured data: {off}")
 
     # ── G4 ────────────────────────────────────────────────────────────────────
     if not thetas:

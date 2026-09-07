@@ -112,4 +112,12 @@ region, with the old literal as a failing regression baseline), G4 (the exp(0)
 placeholder canary), and mode anchoring — including a check that the *old*
 construction fails the anchoring test, so the test has teeth.
 
-`validate_output.py` runs G1/G2/G4 against a produced h5.
+`validate_output.py` runs G1/G2/G4 against a produced h5.  It also grades a
+legacy (pre-declaration) product against the support it *implies*, so the old
+files serve as the regression baseline.
+
+Per-fiber caveat: G2 for a per-fiber support must be graded against per-fiber
+liveness (`telluric_support.py --per-fiber --npz`).  Graded against the global
+curve, the per-fiber union legitimately reaches 1-2 px past the
+50%-of-fibers boundary and G2 reports a false failure; `validate_output.py`
+says so rather than silently passing or silently failing.

@@ -297,7 +297,7 @@ def accumulate_live(paths, min_live_frac=0.5, per_fiber=False, n_pixels=N_PIXELS
 # which is what pushed the fit window past the real data at every APO edge.  The
 # sign is the point; the magnitude should be as small as the data allows, since
 # AKS's directive is to "preserve as much wavelength range as possible".
-# The magnitude should be as small as the data allows.  The (min_live_frac,
+# The (min_live_frac,
 # min_exposure_frac) thresholds are what actually decide whether a pixel has
 # usable data; this buffer only absorbs the +/-1 px quantisation of the
 # threshold crossing.  MEASURED cost of larger values, on the LCO red edge that
@@ -355,10 +355,16 @@ def derive_support(list_path, telescope, min_live_frac=0.5, min_exposure_frac=0.
     """Derive a :class:`SupportSpec` from a dome-flat input list.
 
     ``n_sample`` evenly subsamples the (mjd, exposure)-sorted list; ``None``
-    scans everything.  The edges are sharp (the live fraction goes 0 -> ~0.9 in
-    1-2 px), so 60 exposures spanning the full MJD range already pins every
-    boundary; the parameter is exposed so the full scan can be run for the
-    record.
+    scans everything.  60 exposures spanning the full MJD range already pin
+    every boundary to +/-1 px; the parameter is exposed so the full list can be
+    scanned for the record.
+
+    MEASURED caveat (SUPPORT_REPORT.md section 4): the APO footprint shifts
+    ~30 px blueward at MJD ~59200 and stays there, so a single global support
+    is the *median exposure's* footprint, not every exposure's.  At
+    ``min_exposure_frac=0.5`` that is the older epoch; 0.35 takes the union
+    instead.  A per-epoch support cannot be expressed by the current
+    one-design_matrix-per-product layout.
     """
     lines = [l.strip() for l in Path(list_path).read_text().splitlines() if l.strip()]
     n_all = len(lines)
