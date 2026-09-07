@@ -496,7 +496,22 @@ a rebuild under any option never overwrites products built under another.
   "quantile:FRAC"   unit-free: flag FRAC of pixels bright per fiber, e.g. "quantile:0.083"
   "linedetect"      CALIBRATED detector (AKS 2026-09-06): running-MAD scale over 2001 px,
                     outlier cut k=90, dilation 4. Tune as "linedetect:SW,K,DIL[,CONTWIN]".
+  "combined[:VAR]"  DELIVERED default (AKS 2026-09-07): `linedetect` run per fiber, then
+                    COMBINED across fibers into ONE fiber-independent mask, read from
+                    `E5_BRIGHT_COMBINED`. VAR selects the combination rule; default
+                    `majority` (flagged in >=300 of 600 fibers) — AKS's "lines that
+                    register as bright for many/most of the fibers", and the MEASURED
+                    optimum against DR17 (mean pixel IoU 0.937, on a broad interior
+                    plateau from >=150 to >=540). Also `union` (>=1 fiber, AKS's "most
+                    conservative"), `drop12` (>=3), `q25` (>=150), `telemaj_or` /
+                    `telemaj_and` (per-telescope majorities OR'd / AND'ed), and
+                    `apo_*` / `lco_*` which combine within one telescope only.
+                    The mask is fiber-independent BY CONSTRUCTION: the same array is
+                    intersected with every fiber's own submsk.
 """
+const E5_BRIGHT_COMBINED_DEFAULT =
+    "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_07/e5_combined/e5_bright_combined.h5"
+
 function e5_parse_thresh_policy(spec::AbstractString)
     spec = strip(spec)
     if spec == "legacy"
@@ -522,11 +537,25 @@ function e5_parse_thresh_policy(spec::AbstractString)
         return Dict(:mode => :linedetect, :scale_window => sw, :k => k,
                 :dilation => dil, :cont_window => cw),
             "linedet_sw$(sw)_k$(ktag)_d$(dil)" * (cw == 0 ? "" : "_cw$(cw)")
+    elseif spec == "combined" || startswith(spec, "combined:")
+        variant = spec == "combined" ? "majority" : String(spec[10:end])
+        path = get(ENV, "E5_BRIGHT_COMBINED", E5_BRIGHT_COMBINED_DEFAULT)
+        isfile(path) || error("e5_parse_thresh_policy: combined mask file not found: $path " *
+                              "(set E5_BRIGHT_COMBINED, or build it with e5_bright_combine.jl --stage=eval)")
+        # fail at PARSE time, not on worker 137 an hour into the build
+        avail = h5open(path, "r") do fh
+            [k[6:end] for k in keys(fh) if startswith(k, "mask_")]
+        end
+        (variant in avail) || error("e5_parse_thresh_policy: combined variant $(repr(variant)) " *
+                                    "not in $path (have: $(join(sort(avail), ", ")))")
+        return Dict(:mode => :combined, :variant => variant, :path => path),
+            "combined_" * variant
     elseif startswith(spec, "quantile:")
         fr = parse(Float64, spec[10:end])
         return Dict(:mode => :quantile, :bright_frac => fr), "q" * replace(string(fr), "." => "p")
     end
-    error("e5_parse_thresh_policy: unknown policy spec $(repr(spec)) (expected legacy|off|abs:APO,LCO|quantile:FRAC)")
+    error("e5_parse_thresh_policy: unknown policy spec $(repr(spec)) " *
+          "(expected legacy|off|abs:APO,LCO|quantile:FRAC|linedetect[:...]|combined[:VAR])")
 end
 
 """

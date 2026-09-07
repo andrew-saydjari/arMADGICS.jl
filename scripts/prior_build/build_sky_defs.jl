@@ -220,6 +220,24 @@ Requires scripts/prior_build/e5_bright_line_detect.jl to be included by the call
 """
 function resolve_bright_mask(policy, adjfibindx, median_sky, submsk,
         legacy_fun=default_thresh_bright_faint)
+    # AKS 2026-09-07: the delivered bright mask is COMBINED across fibers, so it does not
+    # depend on adjfibindx at all -- it is read from disk and simply intersected with this
+    # fiber's own submsk. ("it is kind of weird to have different wavelengths masked as
+    # 'bright' skylines depending on the fiber number. Because we are only applying it as
+    # a mask, ... combine the information across all 600 [fibers]".) `median_sky` is
+    # deliberately unused here; the per-fiber detection that produced the combined mask
+    # happened upstream in e5_bright_combine.jl.
+    if !isnothing(policy) && get(policy, :mode, :absolute) == :combined
+        path = policy[:path]
+        dset = "mask_" * String(policy[:variant])
+        isfile(path) || error("resolve_bright_mask: combined mask file not found: $path")
+        full = Bool.(h5read(path, dset))
+        length(full) == length(submsk) || error(
+            "resolve_bright_mask: combined mask length $(length(full)) != grid $(length(submsk))")
+        desc = "combined variant=$(policy[:variant]) src=$(basename(path)) " *
+               "(fiber-independent; linedetect per fiber then combined across fibers)"
+        return full[submsk], desc, NaN
+    end
     if !isnothing(policy) && get(policy, :mode, :absolute) == :linedetect
         sw = get(policy, :scale_window, 2001)
         k = float(get(policy, :k, 90.0))

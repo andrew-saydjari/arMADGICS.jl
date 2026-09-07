@@ -18,11 +18,25 @@
 #
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "<policy>"   # one 7-node job
 #
-#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "linedetect"      # RECOMMENDED (calibrated)
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:majority"  # RECOMMENDED (2026-09-07)
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:union"     # AKS's "most conservative"
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:drop12"    # AKS's "reject 1-2 fibers"
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "combined:telemaj_or"  # per-telescope, OR'd
+#   sbatchAKS submit_E5_sky_rebuild_thresh.sh "linedetect"      # per-FIBER (superseded)
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:35,8"        # (A) match DR17 ~8.3% bright
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "abs:150,40"      # (B) physical bright lines, ~5%
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "quantile:0.083"  # (C) unit-free per-fiber quantile
 #   sbatchAKS submit_E5_sky_rebuild_thresh.sh "off"             # (D) declared no-split
+#
+# "combined" (AKS 2026-09-07) is the DELIVERED default: the calibrated `linedetect`
+# detector is run per fiber, and the 600 per-fiber masks are then COMBINED into ONE
+# fiber-independent mask, so the same wavelengths are masked as bright on every fiber.
+# The combined mask is a PRECOMPUTED ARTIFACT (E5_BRIGHT_COMBINED below), built by
+# scripts/prior_build/e5_bright_combine.jl; the build only reads it. `:VAR` selects the
+# combination rule; bare "combined" == "combined:majority" (>=300 of 600 fibers), which is
+# the MEASURED optimum against DR17 (mean pixel IoU 0.937 vs 0.826 for union, 0.861 for
+# drop12) and matches DR17's deployed bright fraction most closely (8.06%/8.09% vs DR17's
+# 8.35%/8.15%). Prefer the EXPLICIT ":majority" form so the job log records the choice.
 #
 # Option (D) needs NO rebuild if the current job finishes: "off" is numerically
 # identical to what the inherited constants already produce (they flag 0 pixels).
@@ -146,10 +160,27 @@ export E5_NWORKERS=$TPN
 # threshold policy: first CLI arg wins, else pre-set E5_THRESH_POLICY, else fail loudly
 export E5_THRESH_POLICY="${1:-${E5_THRESH_POLICY:-}}"
 if [ -z "$E5_THRESH_POLICY" ] || [ "$E5_THRESH_POLICY" = "legacy" ]; then
-    echo "ERROR: pass a threshold policy, e.g. 'abs:35,8' | 'abs:150,40' | 'quantile:0.083' | 'off'."
+    echo "ERROR: pass a threshold policy, e.g. 'combined' | 'combined:union' | 'linedetect' | 'off'."
     echo "       'legacy' is the inherited no-op (finding #35) and is refused here."
     exit 2
 fi
+
+# COMBINED bright mask artifact (AKS 2026-09-07). Only read by the 'combined*' policies,
+# but exported unconditionally so the provenance is in the job log either way. The policy
+# parser fails LOUDLY at parse time if the file or the requested variant is missing, so a
+# typo cannot silently fall through to a different mask.
+export E5_BRIGHT_COMBINED=/mnt/ceph/users/sdssv/work/asaydjari/2026_09_07/e5_combined/e5_bright_combined.h5
+case "$E5_THRESH_POLICY" in
+  combined*)
+    if [ ! -f "$E5_BRIGHT_COMBINED" ]; then
+        echo "ERROR: policy '$E5_THRESH_POLICY' needs the combined mask artifact, missing:"
+        echo "       $E5_BRIGHT_COMBINED"
+        echo "       Build it with: julia --project=. scripts/prior_build/e5_bright_combine.jl --stage=eval"
+        exit 4
+    fi
+    echo "E5_BRIGHT_COMBINED=$E5_BRIGHT_COMBINED ($(stat -c %y "$E5_BRIGHT_COMBINED"))"
+    ;;
+esac
 export E5_BRIGHT_GUARD=error
 # calibrated policies land at ~8% bright (DR17: 8.35% APO / 8.15% LCO); 4-15% is loose
 # enough for per-fiber scatter and tight enough to catch a no-op or a runaway mask
