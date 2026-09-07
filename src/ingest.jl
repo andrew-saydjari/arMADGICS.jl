@@ -257,30 +257,33 @@ Woodbury solves. Differences from DR17, both deliberate:
 
 Restores the DR17 obs-count threshold (audit item 10) via `sky_obs_count_mask`.
 
+The exposure-level half (almanac sky-fiber lookup, ar1Dunical read, M-SKY guard) is
+identical for every target fiber on the exposure and is obtained through
+`get_sky_bundle` (src/skyCache.jl), which may serve it from an on-disk per-exposure
+cache. The cache is OFF unless `ARM_SKY_CACHE_DIR` is set, and a hit is by construction
+indistinguishable from a miss: nothing cached depends on the priors.
+
 Returns `(nSkyFibers, meanLocSky, VLocSky, meanLocSkyLines, VLocSkyLines,
 msk_local_skyLines, skyBit)`. On a skipped sky construction (no/too-few fibers)
 all components are exact no-ops (zeros; single zero columns) and `skyBit` is set.
 """
 function getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyline_faint, V_skycont;
-        skyZcut=10, sky_obs_thresh=5, min_fibers::Int=SKY_MIN_FIBERS)
+        skyZcut=10, sky_obs_thresh=5, min_fibers::Int=SKY_MIN_FIBERS,
+        cache_root=sky_cache_root())
     npix = length(logUniWaveAPOGEE)
     # skipped-sky no-op return (mirrors the M-SKY guarded skip in getSkyRough)
     skyskip = skyBit -> (0, zeros(npix), zeros(npix, 1), zeros(npix), zeros(npix, 1), ones(Bool, npix), skyBit)
 
-    skyfibIndxs = get_sky_fiber_indices(almanacFile, tele, mjd, expnum)
+    bundle = get_sky_bundle(reduxBase, tele, mjd, expnum, almanacFile;
+        skyZcut=skyZcut, cache_root=cache_root)
+    skyfibIndxs = bundle.skyfibIndxs
     if length(skyfibIndxs) == 0
         return skyskip(SKY_NO_FIBERS_BIT | SKY_TOO_FEW_FIBERS_BIT)
     end
 
-    ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
-    f = jldopen(ar1Dfname)
-    skyspec = f["flux_1d"][:, skyfibIndxs]
-    skyivar = f["ivar_1d"][:, skyfibIndxs]
-    skymskmat = f["mask_1d"][:, skyfibIndxs]
-    close(f)
-
-    # identical guard chain to getSkyRough/combine_sky_fibers (M-SKY)
-    mskSky, nSkyFibers, skyBit, skyFibBits = select_sky_fibers(skyspec, skyivar, skymskmat; skyZcut=skyZcut)
+    skyBit = bundle.skyBit
+    nSkyFibers = bundle.nSkyFibers
+    skyFibBits = bundle.skyFibBits
     if skyBit != 0
         flagged = [(skyfibIndxs[j], skyFibBits[j]) for j in findall(skyFibBits .!= 0)]
         println("getSky4visit: sky guard flagged tele=$tele, mjd=$mjd, expnum=$expnum: skyBit=$skyBit, (fiberindx, skyFibBit)=$flagged")
@@ -291,19 +294,22 @@ function getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyli
     end
 
     # decompose each surviving sky fiber with the TARGET fiber's priors (DR17 pattern:
-    # continuum component from the low-rank solve; line residual on covered pixels)
+    # continuum component from the low-rank solve; line residual on covered pixels).
+    # The bundle already holds ONLY the guard-surviving columns, in ascending
+    # candidate order, so this loop is the old `for j in findall(mskSky)` unchanged.
+    survIndxs = skyfibIndxs[findall(bundle.mskSky)]
     cont_cols = Vector{Float64}[]
     lines_cols = Vector{Float64}[]
-    for j in findall(mskSky)
-        fvec = skyspec[:, j]
-        fivar = skyivar[:, j]
-        covmsk = Bool.(skymskmat[:, j]) .& isfinite.(fvec) .& isfinite.(fivar) .& (fivar .> 0)
+    for j in 1:nSkyFibers
+        fvec = bundle.survspec[:, j]
+        fivar = bundle.survivar[:, j]
+        covmsk = bundle.survmsk[:, j] .& isfinite.(fvec) .& isfinite.(fivar) .& (fivar .> 0)
         contvec = sky_decomp(fvec, 1 ./ fivar, covmsk .& skymsk, V_skyline_faint, V_skycont)
         if !all(isfinite, contvec)
             # hardening beyond DR17: a non-finite decomposition would poison every
             # solve on the exposure — drop the fiber and record it
             skyBit |= SKY_NONFINITE_DECOMP_BIT
-            println("getSky4visit: non-finite sky decomposition dropped fiberindx=$(skyfibIndxs[j]) (tele=$tele, mjd=$mjd, expnum=$expnum)")
+            println("getSky4visit: non-finite sky decomposition dropped fiberindx=$(survIndxs[j]) (tele=$tele, mjd=$mjd, expnum=$expnum)")
             flush(stdout)
             continue
         end

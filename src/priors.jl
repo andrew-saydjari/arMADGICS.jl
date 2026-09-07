@@ -21,6 +21,13 @@
 #                           default <prior_dir>/2026_09_05/prior_outputs/starLines_perfiber
 #   ARM_STARLINES_REFLSF_HACK=1  fall back to the pre-E7 refLSF hack
 #                           (V_starlines = V_starlines_refLSF) — regression use only
+#
+# One further ARM_* variable lives outside this file; listed here so this comment stays
+# the single index of runtime environment overrides:
+#   ARM_SKY_CACHE_DIR       root of the per-exposure sky-bundle cache (src/skyCache.jl).
+#                           UNSET (the default) = no caching, byte-identical behaviour.
+#                           Nothing that cache stores depends on any prior set, so
+#                           repointing any variable above cannot stale it.
 
 """
     build_prior_dict(prior_dir)

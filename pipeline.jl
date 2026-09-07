@@ -89,6 +89,7 @@ flush(stdout);
     include(joinpath(src_dir, "src/fileNameHandling.jl"))
     include(joinpath(src_dir, "src/priors.jl"))
     include(joinpath(src_dir, "src/ingest.jl"))
+    include(joinpath(src_dir, "src/skyCache.jl"))
     include(joinpath(src_dir, "src/lowRankPrescription.jl"))
     include(joinpath(src_dir, "src/marginalizeEW.jl"))
     include(joinpath(src_dir, "src/spectraInterpolation.jl"))
