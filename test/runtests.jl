@@ -1,7 +1,7 @@
 using arMADGICS #Why isn't LowRankOps loaded here?
 using Test, Random
 
-using FITSIO, HDF5, LowRankOps, EllipsisNotation, ShiftedArrays, Interpolations, SparseArrays, ParallelDataTransfer
+using FITSIO, HDF5, JLD2, LowRankOps, EllipsisNotation, ShiftedArrays, Interpolations, SparseArrays, ParallelDataTransfer
 using StatsBase, LinearAlgebra, ProgressMeter, Serialization, Downloads
 
 sdss_public_tst = "https://data.sdss5.org/resources/pipelines/apogee_drp/unit_test/"
@@ -13,6 +13,7 @@ include(src_dir * "src/componentAndPosteriors.jl")
 include(src_dir * "src/fileNameHandling.jl")
 include(src_dir * "src/priors.jl")
 include(src_dir * "src/ingest.jl")
+include(src_dir * "src/skyCache.jl")
 include(src_dir * "src/lowRankPrescription.jl")
 include(src_dir * "src/marginalizeEW.jl")
 include(src_dir * "src/spectraInterpolation.jl")
@@ -28,4 +29,5 @@ include("marginalizeEW.jl")
 include("sky_prior_contract.jl")
 include("priors.jl")
 include("sky_wiring.jl")
+include("sky_cache.jl")
 include("prior_build_smoke.jl")

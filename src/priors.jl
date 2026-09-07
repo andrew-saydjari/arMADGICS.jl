@@ -24,6 +24,17 @@
 #   ARM_PRIOR_SUPPORT_RELTOL     relative-power threshold for the prior-support guard
 #                           in load_fiber_priors (default 1e-2; set to 0 to DISABLE
 #                           the guard for before/after regression comparisons)
+#
+# One further ARM_* variable lives outside this file; listed here so this comment stays
+# the single index of runtime environment overrides:
+#   ARM_SKY_CACHE_DIR       root of the per-exposure sky-bundle cache (src/skyCache.jl).
+#                           UNSET (the default) = no caching, byte-identical behaviour.
+#                           Nothing that cache stores depends on any prior set: every
+#                           cached quantity is computed BEFORE the priors are touched.
+#                           So repointing any variable above — including
+#                           ARM_PRIOR_SUPPORT_RELTOL, whose guard narrows chebmsk_exp
+#                           (and hence skymsk) on LCO fibers — cannot stale a cache
+#                           entry, and the guard needs no cache invalidation.
 
 """
     build_prior_dict(prior_dir)
