@@ -128,3 +128,54 @@ indistinguishable from unflagged data (median 49.1 vs 43.4) — it records that 
 sky screen did its job, not that the spectrum is suspect. All 300 `skyBit = 12`
 spectra are a single exposure (LCO MJD 57802, exposure 215).
 
+## Exposure-Level Science Guard (prior builds)
+
+AKS 2026-09-08: *"we want to be sure no prior builds after any first pass use
+data for which the flagged column is bad or engineering."*
+
+Two exposure-level verdicts must be honoured before an exposure may enter a
+prior sample:
+
+| Source | Meaning |
+| --- | --- |
+| `raw/<tele>/<mjd>/exposures/flagged_bad` | the almanac's own bad-exposure flag |
+| `exposure_class/<tele>/<mjd>/exposure_flags` bit 0 | `predicted_bad` — ApogeeReduction's image-content classifier says do not use |
+| `exposure_class/<tele>/<mjd>/exposure_flags` bit 1 | `engineering` — the configuration's science fibers carry an engineering carton (e.g. `manual_fps_position_stars*` FPS positioning frames) |
+
+The `exposure_class` group is written by
+`ApogeeReduction/scripts/cal/decorate_almanac_exptype.jl`; see the
+"Exposure-Level Flag Bits" table in the AR README. **An almanac that has not
+been decorated (or that was decorated before the engineering bit existed, i.e.
+has `predicted_bad` but no `exposure_flags`) makes the guard throw** — there is
+no way to honour the requirement without those bits. `ARM_ALLOW_UNDECORATED_ALMANAC=1`
+downgrades the throw to a loud warning; it is for smoke tests only, never for a
+prior whose products will be used for science.
+
+**Practical consequence:** decorating the almanac is now a prerequisite of any
+prior build. As of 2026-09-08 the DR21 drop-in almanac
+(`2026_09_04/almanac_builds/allobs_57618_61230.h5`) has no `exposure_class`
+group at all, and the 2026_05_01 almanac has the pre-engineering-bit schema —
+both make the guard throw until the AR decoration step is run over them.
+
+The guard is implemented in `src/exposureGuard.jl` (standalone, HDF5-only, so
+lightweight builder scripts can include just it) and is **loud by design**: a
+silent filter is worse than none, because nobody can tell whether it ran.
+
+### Where the guard applies
+
+| Entry point | Guarded? | How |
+| --- | --- | --- |
+| `src/ingest.jl: get_telemjd_runlist_from_almanac` | **yes** | the single choke point for every almanac-derived runlist; excludes flagged exposures and `@info`-logs the count, reasons and exposure numbers per (tele, mjd) |
+| `scripts/prior_build/sample_sky.jl` → `sample_sky_main` | **yes** | corpus-wide `almanac_science_exposure_census` banner up front (fails fast on an undecorated almanac, before hours of compute) + the runlist filter above |
+| `scripts/prior_build/e5_sky_run.jl` (branch `run/E5-sky-retrain`) | **yes, inherited** | its `e5_collect_sky_runlist` goes through `get_telemjd_runlist_from_almanac`; when that branch merges it is guarded with no further change. It does not yet print the census banner |
+| `scripts/prior_build/build_skyCont.jl`, `build_skyLines.jl` (`build_sky_defs.jl`) | **yes, verified** | they consume sample files, not the almanac; `sample_sky` stamps `exposure_guard` onto `skyflux_NNN.h5` and `read_sky_sample` reports the stamp once per sample dir (loud banner when absent or bypassed) |
+| `scripts/prior_build/build_tfunlists.jl` | **yes** | new `C4` cut: source exposures are parsed out of the recorded `ar1Dunical` paths and looked up in the almanac; excluded exposures and the counts are logged and written into the audit file |
+| `scripts/prior_build/sample_starCont.jl` | **no — cannot** | consumes telluric transfer-function refits + the tfunlists; it never sees an exposure identity. It is guarded *transitively* because `build_tfunlists.jl` (which produces its `tfun_sample_lst`) now applies C4 |
+| `scripts/prior_build/build_starCont.jl` | **no — cannot** | consumes `sample_starCont`'s synthetic draws; same transitive guarantee |
+| `scripts/prior_build/sample_Korg.jl`, `build_starLines.jl`, `build_DIB.jl` | **n/a** | purely synthetic (Korg spectra, dust profiles, LSF matrices) — no observed exposures enter |
+| `scripts/prior_build/build_starLines_dd.jl` | **no — cannot** | data-driven from a *previous apMADGICS run's* outputs (`2024_03_16/apMADGICS_out.h5` + DR17 `map2visit`/`map2star`), which carry no link back to an almanac exposure row. Guarding it needs a visit-level join that does not exist today |
+
+Two of those rows are honest gaps, not clean bills of health: `build_starLines_dd.jl`
+cannot be guarded at all with the inputs it has, and `sample_starCont.jl` /
+`build_starCont.jl` are only as clean as the tfunlists handed to them.
+

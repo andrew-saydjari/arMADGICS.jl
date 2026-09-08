@@ -4,6 +4,10 @@
 using AstroTime
 import ApogeeReduction: get_fibTargDict, fiberID2fiberIndx, read_almanac_exp_df
 
+# Exposure-level science-safety guard (AKS 2026-09-08). Lives in its own file so
+# that lightweight prior-build scripts can include only it; see src/exposureGuard.jl.
+@isdefined(EXPFLAG_NO_SCIENCE) || include(joinpath(@__DIR__, "exposureGuard.jl"))
+
 ## M-SKY sky-prior guards
 # The exposure-level sky-line prior (VLocSkyLines) is an empirical covariance built
 # directly from the sky-fiber spectra of the exposure. A single NaN/Inf pixel in any
@@ -441,6 +445,23 @@ function get_telemjd_runlist_from_almanac(
     df_exp = read_almanac_exp_df(f, tele, mjd)
     msk_obj = (df_exp.image_type .== "object")
     msk_obj .&= (df_exp.n_read .> 3) .& (df_exp.chip_flags .== 7) .& (df_exp.flagged_bad .== 0)
+
+    # AKS 2026-09-08 guard: drop exposures the pipeline has flagged bad or
+    # engineering. Loud on purpose — the count and the reason are logged for
+    # every (tele, mjd) that loses anything.
+    expflags = read_exposure_science_flags(f, tele, mjd, df_exp.exposure)
+    msk_sci = (expflags .& EXPFLAG_NO_SCIENCE) .== 0x00
+    dropped = msk_obj .& .!msk_sci
+    if any(dropped)
+        r = exposure_science_exclusion_reasons(expflags[dropped])
+        @info "Exposure-level science guard EXCLUDED $(r.n_excluded) of " *
+              "$(count(msk_obj)) candidate object exposures for $(tele)/$(mjd): " *
+              "predicted_bad=$(r.n_predicted_bad) engineering=$(r.n_engineering) " *
+              "both=$(r.n_both). Excluded exposure numbers: " *
+              "$(collect(df_exp.exposure[dropped]))"
+    end
+    msk_obj .&= msk_sci
+
     row_exp = df_exp[msk_obj, :].exposure
     run_lsts = []
     for expnum in row_exp

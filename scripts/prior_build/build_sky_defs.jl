@@ -56,9 +56,76 @@ Read one per-fiber sample matrix written by sample_sky (dataset `prefix` in
 function read_sky_sample(sample_dir, prefix, adjfibindx)
     path = sky_sample_path(sample_dir, prefix, adjfibindx)
     isfile(path) || error("read_sky_sample: $path not found; expected the $(prefix)_NNN.h5 files written by sample_sky.jl in sample_dir=$sample_dir")
+    check_sky_sample_guard_stamp(sample_dir, adjfibindx)
     out = h5read(path, prefix)
     (size(out, 1) == length(wavetarg)) || error("read_sky_sample: $path dataset $prefix has leading dimension $(size(out,1)), expected length(wavetarg)=$(length(wavetarg))")
     return out
+end
+
+# sample dirs already reported on (one banner per dir, not one per fiber)
+const _SKY_GUARD_REPORTED = Set{String}()
+
+"""
+    check_sky_sample_guard_stamp(sample_dir, adjfibindx)
+
+AKS 2026-09-08 harness: the sky priors must not be built from sample files whose
+runlist was never screened for bad/engineering exposures. `sample_sky` stamps
+`exposure_guard` onto `skyflux_NNN.h5`; this reports what it finds, ONCE per
+sample directory, so every prior-build log states the guard provenance of its
+inputs.
+
+Deliberately a loud report and not a hard error: sample directories produced
+before 2026-09-08 are legitimately unstamped, and refusing to build from them
+would strand in-flight work. An unstamped or explicitly-unguarded directory
+produces a banner that is impossible to miss in a log.
+"""
+function check_sky_sample_guard_stamp(sample_dir, adjfibindx)
+    key = string(sample_dir)
+    (key in _SKY_GUARD_REPORTED) && return nothing
+    push!(_SKY_GUARD_REPORTED, key)
+    fluxpath = sky_sample_path(sample_dir, "skyflux", adjfibindx)
+    stamp, unguarded, alm = try
+        # NOTE: HDF5.jl's `attrs(f)[name]` returns the attribute VALUE, not an
+        # Attribute object — do not wrap it in read() (that throws, and the
+        # throw would be swallowed into a misleading "no stamp" verdict).
+        isfile(fluxpath) ? h5open(fluxpath, "r") do f
+            a = attrs(f)
+            (haskey(a, "exposure_guard") ? String(a["exposure_guard"]) : nothing,
+                haskey(a, "exposure_guard_unguarded_env") ?
+                String(a["exposure_guard_unguarded_env"]) : "?",
+                haskey(a, "exposure_guard_almanac") ? String(a["exposure_guard_almanac"]) :
+                "?")
+        end : (nothing, "?", "?")
+    catch e
+        @warn "read_sky_sample: could not read the exposure-guard stamp from $fluxpath" exception = e
+        (nothing, "?", "?")
+    end
+    if isnothing(stamp)
+        @warn """
+        ========================================================================
+        PRIOR BUILD FROM UNGUARDED SKY SAMPLES
+        sample_dir = $(sample_dir)
+        These sample files carry no `exposure_guard` stamp, so it CANNOT be shown
+        that exposures flagged bad or engineering were excluded from the runlist
+        that produced them (samples written before 2026-09-08 are unstamped by
+        construction). Re-run sample_sky against a decorated almanac to build a
+        guaranteed-clean prior.
+        ========================================================================"""
+    elseif unguarded == "1"
+        @warn """
+        ========================================================================
+        PRIOR BUILD FROM EXPLICITLY UNGUARDED SKY SAMPLES
+        sample_dir = $(sample_dir); almanac = $(alm)
+        These samples were produced with ARM_ALLOW_UNDECORATED_ALMANAC=1, i.e.
+        the exposure-level science guard was bypassed. Bad/engineering exposures
+        may be in this prior.
+        ========================================================================"""
+    else
+        println("read_sky_sample: exposure guard OK for $(sample_dir) " *
+                "(stamp=$(stamp), almanac=$(alm))")
+        flush(stdout)
+    end
+    return nothing
 end
 
 function read_chipgap_msk(chipgap_msk_path, adjfibindx)

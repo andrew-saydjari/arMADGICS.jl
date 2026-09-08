@@ -108,9 +108,20 @@ function get_sky_samples((adjfibindx, runlist);
             skymsk[:, ind] .= pout[pindx][3]
         end
 
-        # Write results to HDF5 files
+        # Write results to HDF5 files.
+        # The guard stamp (AKS 2026-09-08) records ON THE PRODUCT that the runlist
+        # feeding these samples passed the exposure-level science guard. The
+        # downstream builders (read_sky_sample in build_sky_defs.jl) check for it,
+        # so deleting the guard from the sampler also breaks the builders instead
+        # of silently producing unguarded priors.
         h5open(savefluxname, "w") do f
             write(f, "skyflux", skyflux)
+            attrs(f)["exposure_guard"] = "EXPFLAG_NO_SCIENCE"
+            attrs(f)["exposure_guard_mask"] = EXPFLAG_NO_SCIENCE
+            attrs(f)["exposure_guard_almanac"] = string(almanacFile)
+            attrs(f)["exposure_guard_unguarded_env"] =
+                almanac_undecorated_allowed() ? "1" : "0"
+            attrs(f)["n_runlist_entries"] = length(runlist)
         end
         h5open(saveivarname, "w") do f
             write(f, "skyivar", skyivar)
@@ -202,6 +213,14 @@ function sample_sky_main(reduxBase, almanacFile, runlist_range;
     if isnothing(tele_mjd_pairs)
         tele_mjd_pairs = collect_tele_mjd_pairs(almanacFile)
     end
+    # AKS 2026-09-08: no prior build after a first pass may consume exposures whose
+    # flags say bad or engineering. The census throws up front if the almanac was
+    # never decorated with `exposure_class/.../exposure_flags`, and prints the
+    # exclusion tally so the guard's effect is a visible fact in the log rather
+    # than a silent filter. The per-night filtering itself lives inside
+    # get_telemjd_runlist_from_almanac (src/ingest.jl).
+    almanac_science_exposure_census(almanacFile, tele_mjd_pairs;
+        label = "sample_sky_main (sky prior samples)")
     # M4: kwarg is accepted_fibtypes (was passed as fibertype= -> MethodError)
     get_runlist_partial(argtup) = get_telemjd_runlist_from_almanac(almanacFile, argtup[1], argtup[2], accepted_fibtypes=["sky"])
     run_lsts = if runlist_parallel

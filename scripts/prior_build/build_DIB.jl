@@ -1,6 +1,9 @@
 ## This script builds the prior for DIBs using theoretical and analytic lineshapes, for now Gaussians.
 # Author - Andrew Saydjari, CfA
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: n/a — synthetic dust profiles + LSF matrices. See README.
+
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 Pkg.activate("../../"); Pkg.instantiate(); Pkg.precompile()
