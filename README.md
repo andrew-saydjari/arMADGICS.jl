@@ -40,9 +40,9 @@ Another example is
 ```
 which shows how injection tests are handled. This is an injection test into sky observations from DR17 taken on APOGEE-North. The trailing "i" indicates that it is an injection and the number after "apo25m" is a dummy index to prevent collisions of multiple injections into the same sky observation.
 
-## gridSearch Module Flag Bits
+## gridSearch Module Flag Bits (surfaced as `RV_flag`)
 
-There is still a (much smaller dimensional) space that MADGICS needs to sample over (e.g. radial velocity). We have a custom grid-sampler module to implement that sampling. The flag bits from that module are below.
+There is still a (much smaller dimensional) space that MADGICS needs to sample over (e.g. radial velocity). We have a custom grid-sampler module to implement that sampling. The flag bits from that module are below. These are written to the output column **`RV_flag`** (`src/gridSearch.jl`; see `pipeline.jl`).
 
 | Value         | Bit         | Meaning     |
 | ----------- | ----------- | ----------- |
@@ -53,20 +53,78 @@ There is still a (much smaller dimensional) space that MADGICS needs to sample o
 | 8     | 3     | Finite difference Hessian beyond grid edge |
 | 16    | 4     | Bad curvature of chi2 surface (can't invert full 2d Hessian)|
 | 32    | 5     | Very bad curvature of chi2 surface (can't invert diagonal entries)|
+| 64    | 6     | Spectrum never entered the RV scan; see `ingestBit` for why (`INGEST_FAIL_RV_FLAG`, set in `src/pipelineCore.jl`, not by gridSearch) |
 
-## Ingest Module Flag Bits
+Observed on the DR21 200-MJD testbed (1,622,474 spectra): 0 = 1,619,707;
+1 = 4; 8 = 95; 10 = 878; 32 = 82; 64 = 1,708. Value 10 is bits 1+3 (grid edge
+plus Hessian off grid). Value 64 is exactly the `ingestBit != 0` set.
 
-During ingestion, some of the exposure files may have issues that cause the spectrum to come through arMADGICS.jl as a vector of only NaNs. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
+Value 1 is documented above as "should not occur", and it **occurred 4 times**
+(2 APO, 2 LCO). That is rare enough to have gone unnoticed and is worth running
+down rather than assuming benign.
 
-| Value         | Bit         | Meaning     |
-| ----------- | ----------- | ----------- |
-| 0     | -     | No problems       |
-| 2     | 1     | ap1D flux was NaNs (for at least one of the exposures) |
-| 4     | 2     | DRP masked all pixels (for at least one of the exposures) |
-| 8     | 3     | Error calibration NaNed observation or upstream std_dev NaNs (for at least one of the exposures) |
-| 16    | 4     | All NaNs or zeros after interpolation |
-| 32    | 5     | Thrpt in apFlux file below thrpt_cut, NaNed by arMADGICS.jl |
-| 64    | 6     | NaNs in apFlux file, but arMADGICS.jl does not depend on these values |
+## Ingest Module Flag Bits (`ingestBit`)
 
+Set by `validate_exposure` (`src/ingest.jl`) when a 1D uni-cal spectrum is checked
+before entering the MADGICS solve. Bits marked **fatal** cause the spectrum to be
+skipped (`ingest_fatal`); the others record that pixels were masked but the
+spectrum was still fitted.
 
+| Value | Bit | Meaning | Fatal |
+| --- | --- | --- | --- |
+| 0   | -   | No problems | |
+| 1   | 0   | Runtime error while ingesting (`INGEST_RUNTIME_ERROR_BIT`) | **yes** |
+| 2   | 1   | Flux is entirely NaN/zero | **yes** |
+| 4   | 2   | Fewer than `INGEST_MIN_GOODPIX` good pixels after checks | **yes** |
+| 8   | 3   | Non-finite flux inside the good mask (those pixels masked) | |
+| 16  | 4   | Non-finite or non-positive ivar inside the good mask (those pixels masked) | |
+| 32  | 5   | Tiny-ivar pixels masked (below `INGEST_TINY_IVAR_RELFAC` x median good ivar) | |
+| 64  | 6   | `starscale0 = nanzeromedian(flux)` non-finite or <= 0 | **yes** |
+
+`INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6`.
+
+A skipped spectrum is written out with NaN products and `RV_flag = 64`
+(`INGEST_FAIL_RV_FLAG`, `src/pipelineCore.jl`), so **`ingestBit != 0` and
+`RV_flag == 64` are equivalent** — verified exactly on the DR21 200-MJD testbed,
+1,708 spectra of 1,622,474, both directions.
+
+## Sky Module Flag Bits (`skyBit`)
+
+Set in `src/ingest.jl` while building the per-exposure sky model. This is an
+**exposure-level** flag: every spectrum from an exposure carries the same value,
+not just the sky fibers that triggered it.
+
+| Value | Bit | Meaning |
+| --- | --- | --- |
+| 0   | -   | No problems |
+| 1   | 0   | A sky fiber was excluded upstream (`SKY_EXCLUDED_FIBER_BIT`) |
+| 2   | 1   | At least one sky fiber failed the z-cut (`SKY_ZCUT_FIBER_BIT`) |
+| 4   | 2   | Too few sky fibers survived (`SKY_TOO_FEW_FIBERS_BIT`) |
+| 8   | 3   | No sky fibers at all (`SKY_NO_FIBERS_BIT`) |
+| 16  | 4   | At least one KEPT fiber has a non-positive median (`SKY_NEGSCALE_FIBER_BIT`) |
+| 32  | 5   | The sky decomposition went non-finite (`SKY_NONFINITE_DECOMP_BIT`) |
+
+Bits 4 and 8 are set together when an exposure has no usable sky fibers, so
+`skyBit = 12` means the sky model was skipped entirely.
+
+Note bit 16 is informational: those fibers are **kept**. It flags that a fiber
+with a non-positive median entered the sky model, which is not by itself an
+error but is worth screening on.
+
+### Observed distribution (DR21 200-MJD testbed, 1,622,474 spectra)
+
+Useful as a sanity baseline, not as a statement that these rates are acceptable.
+
+| `skyBit` | APO | LCO |
+| --- | ---: | ---: |
+| 0  | 797,750 | 344,854 |
+| 2  | 175,563 | 273,328 |
+| 12 | 0       | 300 |
+| 16 | 22,438  | 2,175 |
+| 18 | 1,853   | 4,213 |
+
+`skyBit = 2` alone accounts for 27.6% of all spectra and its SNR distribution is
+indistinguishable from unflagged data (median 49.1 vs 43.4) — it records that the
+sky screen did its job, not that the spectrum is suspect. All 300 `skyBit = 12`
+spectra are a single exposure (LCO MJD 57802, exposure 215).
 
