@@ -80,13 +80,76 @@ spectrum was still fitted.
 | 16  | 4   | Non-finite or non-positive ivar inside the good mask (those pixels masked) | |
 | 32  | 5   | Tiny-ivar pixels masked (below `INGEST_TINY_IVAR_RELFAC` x median good ivar) | |
 | 64  | 6   | `starscale0 = nanzeromedian(flux)` non-finite or <= 0 | **yes** |
+| 128 | 7   | ApogeeReduction flagged this FIBER's relative throughput unusable on this exposure (`INGEST_RELTHRPT_BROKEN_BIT`) | opt-in |
+| 256 | 8   | AR's per-fiber throughput flag was ABSENT from the `ar1Duni` file (`INGEST_RELTHRPT_UNKNOWN_BIT`) | |
 
-`INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6`.
+`INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6`, plus `2^7` when
+`INGEST_RELTHRPT_FATAL` is on.
 
 A skipped spectrum is written out with NaN products and `RV_flag = 64`
-(`INGEST_FAIL_RV_FLAG`, `src/pipelineCore.jl`), so **`ingestBit != 0` and
-`RV_flag == 64` are equivalent** — verified exactly on the DR21 200-MJD testbed,
-1,708 spectra of 1,622,474, both directions.
+(`INGEST_FAIL_RV_FLAG`, `src/pipelineCore.jl`). Before bits 7 and 8 existed,
+**`ingestBit != 0` and `RV_flag == 64` were equivalent** — verified exactly on
+the DR21 200-MJD testbed, 1,708 spectra of 1,622,474, both directions. Bits 7
+and 8 are informational by default and therefore **break that equivalence**: the
+correct statement is now `ingest_fatal(ingestBit) <=> RV_flag == 64`.
+
+### Per-fiber throughput (`relthrpt`, `bitmsk_relthrpt`, `ingestBit` bit 7)
+
+ApogeeReduction measures each fiber's relative throughput off a dome flat, per
+fiber and per exposure, and records a quality bitmask. **A fiber AR calls broken
+is deliberately left UNSCALED by AR** — not zeroed, not masked, not NaN'd — so
+its flux sits on an arbitrary scale and any chi2 computed from it is nonsense.
+Both fields ride in the `ar1Duni*` file arM already reads, and arM ignored them
+entirely until now.
+
+`getExposure` (`src/ingest.jl`) now reads them and `pipeline_single_spectra`
+writes two new per-spectrum columns:
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `relthrpt` | Float64 | AR's relative throughput for this fiber on this exposure; the worst finite value across chips. `NaN` if unavailable. |
+| `bitmsk_relthrpt` | Int | AR's per-fiber quality bitmask, OR-ed across chips. **`-1` means the field was absent from the reduction: UNKNOWN, not good.** |
+
+AR's bit table (mirrored as `AR_RELTHRPT_*` in `src/ingest.jl`): 1 = low-throughput
+warn, 2 = broken (`relthrpt < 0.07`), 4 = no fluxing file (`relthrpt` forced to 1),
+8 = `relthrpt` non-finite. **`AR_RELTHRPT_UNUSABLE_BITS = 2 | 8`** is the aggressive
+cut, and is exactly the set AR refuses to flux-scale.
+
+**How to mask chi2 analysis.** Cut on `(bitmsk_relthrpt & 10) != 0`, or
+equivalently on `(ingestBit & 128) != 0`. Do NOT cut on bit 1 (warn) — those
+fibers are fluxed normally and are fine. Treat `bitmsk_relthrpt < 0` as UNKNOWN
+and report it separately rather than folding it into either bucket.
+
+**What this does NOT change.** By default bit 7 is informational: the spectrum is
+still solved, still written, and no exposure or fiber is dropped from the
+reduction. Setting `ARM_RELTHRPT_FATAL=1` adds bit 7 to `INGEST_FATAL_BITS`, which
+skips the solve for such fibers and writes NaN products with `RV_flag = 64`. That
+is a real science-behaviour change and is offered as a switch, not assumed.
+
+### Two notions of a broken fiber, and which is authoritative
+
+There are two independent signals and they do not agree. They are kept separate
+on purpose.
+
+| | AR `bitmsk_relthrpt` | arM `ingestBit` bit 6 / `skyBit` bit 4 |
+| --- | --- | --- |
+| Measures | dome-flat throughput, per fiber, per exposure | the science spectrum's own median flux |
+| Sees | a fiber that stops delivering lamp light | a fiber whose extracted flux is non-positive, for any reason |
+| Blind to | a fiber dead on R or G but healthy on B (chip-B-only fluxing, see AR README); a partial, chip-localised loss that keeps the median above 0.07 | any fiber whose flux stays positive despite being badly wrong |
+
+**AR's `bitmsk_relthrpt` is authoritative for "was this fiber flux-calibrated",**
+because it is the flag AR itself acts on: it is the literal record of which fibers
+were scaled and which were left alone. Any analysis asking "is this spectrum's
+flux scale meaningful, and therefore is its chi2 meaningful" must use it.
+
+**arM's `starscale0`/sky guards remain authoritative for "can this spectrum be
+solved at all",** which is a different and narrower question, and they stay in
+place as a last-resort net for whatever the dome-flat cut misses.
+
+They should NOT be merged into a single flag. Merging would lose the distinction
+between "AR knew and declined to flux it" and "arM found it unusable at solve
+time", which are different failure modes with different fixes. Recording both,
+per spectrum, is what lets the disagreement be measured.
 
 ## Sky Module Flag Bits (`skyBit`)
 

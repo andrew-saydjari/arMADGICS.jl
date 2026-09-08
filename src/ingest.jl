@@ -34,13 +34,18 @@ const SKY_MIN_FIBERS = 3
 #       results on those healthy exposures without a poisoning justification. Whether
 #       to exclude them is an AKS decision (they remain subject to the z-cut).
 #   2^4 excluded by the pre-existing scale z-cut (recorded by combine_sky_fibers)
+#   2^5 ApogeeReduction flagged this sky fiber's relative throughput UNUSABLE on this
+#       exposure (AR_RELTHRPT_UNUSABLE_BITS). AR leaves such a fiber unscaled, so its
+#       "sky" is an arbitrarily-scaled noise spectrum.                    [EXCLUDES]
 const SKYFIB_NONFINITE_BIT = 2^0
 const SKYFIB_ALLNANZERO_BIT = 2^1
 const SKYFIB_LOWGOODPIX_BIT = 2^2
 const SKYFIB_NEGSCALE_BIT = 2^3
 const SKYFIB_ZCUT_BIT = 2^4
+const SKYFIB_RELTHRPT_BIT = 2^5
 # bits that remove a fiber from the sky construction (2^3 is informational only)
-const SKYFIB_EXCLUDE_BITS = SKYFIB_NONFINITE_BIT | SKYFIB_ALLNANZERO_BIT | SKYFIB_LOWGOODPIX_BIT
+const SKYFIB_EXCLUDE_BITS = SKYFIB_NONFINITE_BIT | SKYFIB_ALLNANZERO_BIT |
+                            SKYFIB_LOWGOODPIX_BIT | SKYFIB_RELTHRPT_BIT
 
 # exposure-level skyBit codes (recorded per spectrum in the batch output):
 #   2^0 >= 1 candidate sky fiber excluded by validate_sky_fiber (poison guard fired)
@@ -56,6 +61,9 @@ const SKY_NEGSCALE_FIBER_BIT = 2^4
 #   2^5 >= 1 validated sky fiber produced a non-finite prior-based continuum
 #       decomposition and was dropped from the sky construction (getSky4visit)
 const SKY_NONFINITE_DECOMP_BIT = 2^5
+#   2^6 >= 1 candidate sky fiber was excluded by AR's per-fiber throughput flag,
+#       BEFORE the z-cut was computed
+const SKY_RELTHRPT_FIBER_BIT = 2^6
 
 """
     validate_sky_fiber(flux, ivar, msk; min_goodpix=SKY_MIN_GOODPIX)
@@ -85,20 +93,53 @@ function validate_sky_fiber(flux, ivar, msk; min_goodpix::Int=SKY_MIN_GOODPIX)
 end
 
 """
-    select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10)
+    select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, bitmsk_relthrpt=nothing)
 
 The M-SKY guard chain, extracted verbatim from `combine_sky_fibers` so the
 prior-based sky path (`getSky4visit`) applies the IDENTICAL fiber selection:
 `validate_sky_fiber` exclude bits + the pre-existing scale z-cut. Returns
 `(mskSky, nSkyFibers, skyBit, skyFibBits)`.
+
+`bitmsk_relthrpt`, when given, is AR's per-fiber throughput bitmask for the SAME
+candidate sky columns, in the same order. Fibers AR flagged unusable are masked
+FIRST, unconditionally, and only then does the z-cut assess what is left --
+"definitely mask broken fibers, then assess if we need to drop more" (AKS). The
+ordering matters twice over: those fibers must not enter the sky model, and they
+must not enter the median/IQR the z-cut is computed from, where a handful of
+near-zero scales inflate the spread and blunt the cut for everyone else.
 """
-function select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10)
+function select_sky_fibers(skyspec, skyivar, skymsk; skyZcut=10, bitmsk_relthrpt=nothing)
     npix, ncand = size(skyspec)
     skyFibBits = [validate_sky_fiber(view(skyspec, :, j), view(skyivar, :, j), view(skymsk, :, j)) for j in 1:ncand]
+
+    # STEP 1 -- hard pre-filter on AR's per-fiber throughput flag, before anything else.
+    #
+    # Which bits count as broken here, and why:
+    #   bit 1 BROKEN and bit 3 NOTFINITE (= AR_RELTHRPT_UNUSABLE_BITS): excluded. These
+    #     are exactly the fibers AR refused to flux-scale, so what arrives is an
+    #     arbitrarily-scaled (sometimes negative) noise spectrum, not sky.
+    #   bit 0 WARN: NOT excluded. A warn fiber IS flux-scaled by AR, so its sky is on a
+    #     correct scale, merely noisier -- and "noisier than its peers" is precisely the
+    #     question the z-cut exists to answer. Excluding it would discard usable sky data
+    #     on ~2% of fiber-nights for no stated defect.
+    #   bit 2 NOFILE: NOT excluded. `relthrpt` is forced to exactly 1 there, so the
+    #     spectrum is unfluxed but unscaled and perfectly usable as sky. It would also
+    #     fire for EVERY fiber of an exposure at once, so excluding on it would delete
+    #     the entire sky model of any exposure with no dome flat.
+    if !isnothing(bitmsk_relthrpt)
+        @assert length(bitmsk_relthrpt)==ncand "bitmsk_relthrpt must be one entry per candidate sky fiber"
+        for j in 1:ncand
+            b = bitmsk_relthrpt[j]
+            if (b >= 0) && ((b & AR_RELTHRPT_UNUSABLE_BITS) != 0)
+                skyFibBits[j] |= SKYFIB_RELTHRPT_BIT
+            end
+        end
+    end
+
     mskValid = ((skyFibBits .& SKYFIB_EXCLUDE_BITS) .== 0)
 
-    # scale z-cut (pre-existing), computed over validated fibers only (identical to the
-    # old cut when all fibers validate: nanzero* already filtered NaN/Inf/0 scales)
+    # STEP 2 -- scale z-cut (pre-existing), computed over validated fibers only (identical
+    # to the old cut when all fibers validate: nanzero* already filtered NaN/Inf/0 scales)
     skyScale = dropdims(nanzeromedian(skyspec, 1), dims=1)
     skyMed = nanzeromedian(skyScale[mskValid])
     skyIQR = nanzeroiqr(skyScale[mskValid])
@@ -284,11 +325,11 @@ function getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyli
     skyBit = bundle.skyBit
     nSkyFibers = bundle.nSkyFibers
     skyFibBits = bundle.skyFibBits
-    if skyBit != 0
-        flagged = [(skyfibIndxs[j], skyFibBits[j]) for j in findall(skyFibBits .!= 0)]
-        println("getSky4visit: sky guard flagged tele=$tele, mjd=$mjd, expnum=$expnum: skyBit=$skyBit, (fiberindx, skyFibBit)=$flagged")
-        flush(stdout)
-    end
+    # The "sky guard flagged" line used to be printed HERE, once per target fiber, which
+    # reprinted one exposure-level verdict ~130x (98% of the job log). It now prints from
+    # `compute_sky_bundle`, at the site where the verdict is computed, with identical
+    # text so the AR-side log census keeps working. Nothing is lost: the verdict also
+    # rides out per spectrum in the `skyBit` output column.
     if nSkyFibers < min_fibers
         return skyskip(skyBit | SKY_TOO_FEW_FIBERS_BIT)
     end
@@ -363,8 +404,80 @@ const INGEST_TINY_IVAR_RELFAC = 1e-6
 #   2^4 non-finite or non-positive ivar inside the good mask (pixels masked)
 #   2^5 tiny-ivar pixels masked (below INGEST_TINY_IVAR_RELFAC * median good ivar)
 #   2^6 starscale0 = nanzeromedian(flux) non-finite or <= 0    (fatal -> skip)
+#   2^7 ApogeeReduction flagged this FIBER's relative throughput unusable on this
+#       exposure (dead/near-dead fiber). AR deliberately leaves such a fiber
+#       UNSCALED -- not zeroed, not masked -- so its flux is on an arbitrary scale
+#       and any chi2 computed from it is meaningless. Informational by default;
+#       see INGEST_RELTHRPT_FATAL.
+#   2^8 AR's per-fiber throughput flag was ABSENT from the ar1Duni file (a
+#       reduction older than the flag). This is NOT a clean bill of health: fiber
+#       throughput is UNKNOWN and must not be silently treated as good.
 const INGEST_RUNTIME_ERROR_BIT = 2^0
-const INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6
+const INGEST_RELTHRPT_BROKEN_BIT = 2^7
+const INGEST_RELTHRPT_UNKNOWN_BIT = 2^8
+
+# ---------------------------------------------------------------------------
+# ApogeeReduction per-FIBER relative-throughput bitmask (`bitmsk_relthrpt`)
+#
+# Mirrors the bit table in ApogeeReduction.jl `src/ar1D.jl` (RELTHRPT_*_BIT).
+# AR is AUTHORITATIVE for "is this fiber delivering light on this exposure",
+# because it measures throughput directly off a dome flat, per fiber, per
+# exposure. arM's own `starscale0 <= 0` / good-pixel guards remain as a
+# last-resort net for what AR's dome-flat cut does not catch; the two are
+# deliberately kept as separate, independently-recorded signals rather than
+# merged (see README, "Two notions of a broken fiber").
+#
+# Duplicated here rather than imported from ApogeeReduction so this repo keeps
+# working against reductions produced by an AR that predates the constants.
+# TODO: switch to `using ApogeeReduction: RELTHRPT_UNUSABLE_BITS` once the AR
+# side has landed on main and the pinned AR rev has moved past it.
+# ---------------------------------------------------------------------------
+const AR_RELTHRPT_WARN_BIT = 2^0      # low throughput, still usable
+const AR_RELTHRPT_BROKEN_BIT = 2^1    # relthrpt < rel_val_cut: dead/near-dead fiber
+const AR_RELTHRPT_NOFILE_BIT = 2^2    # no fluxing file; relthrpt forced to exactly 1
+const AR_RELTHRPT_NOTFINITE_BIT = 2^3 # relthrpt NaN/Inf
+"Bits meaning AR did not (and could not) flux-scale the fiber. See AR src/ar1D.jl."
+const AR_RELTHRPT_UNUSABLE_BITS = AR_RELTHRPT_BROKEN_BIT | AR_RELTHRPT_NOTFINITE_BIT
+"Sentinel `bitmsk_relthrpt` value used when the AR product does not carry the field."
+const AR_RELTHRPT_ABSENT = -1
+
+"""
+Whether `INGEST_RELTHRPT_BROKEN_BIT` should SKIP the spectrum rather than merely
+flag it.
+
+DEFAULT `false`. With the default, a throughput-broken fiber is still solved and
+still written: nothing is dropped from the reduction and no science behaviour
+changes. The point of the flag is to make the condition VISIBLE, via the
+`relthrpt` / `bitmsk_relthrpt` / `ingestBit` columns in the raw outputs, so that
+chi2 analysis can mask it.
+
+Set `ARM_RELTHRPT_FATAL=1` in the environment to make it fatal instead (spectrum
+skipped, NaN products written, `RV_flag = 64`). That IS a science-behaviour
+change; it is offered, not assumed. See README.
+"""
+const INGEST_RELTHRPT_FATAL = get(ENV, "ARM_RELTHRPT_FATAL", "0") in ("1", "true", "TRUE")
+
+const INGEST_FATAL_BITS = (2^0 | 2^1 | 2^2 | 2^6) |
+                          (INGEST_RELTHRPT_FATAL ? INGEST_RELTHRPT_BROKEN_BIT : 0)
+
+"""
+    relthrpt_ingest_bits(bitmsk_relthrpt)
+
+Translate AR's per-fiber throughput bitmask into `ingestBit` bits.
+
+A negative value (`AR_RELTHRPT_ABSENT`, i.e. the field was not in the file) maps
+to `INGEST_RELTHRPT_UNKNOWN_BIT`, never to "good": a reduction that never
+measured the fiber has not earned a clean verdict.
+"""
+function relthrpt_ingest_bits(bitmsk_relthrpt::Integer)
+    if bitmsk_relthrpt < 0
+        INGEST_RELTHRPT_UNKNOWN_BIT
+    elseif (bitmsk_relthrpt & AR_RELTHRPT_UNUSABLE_BITS) != 0
+        INGEST_RELTHRPT_BROKEN_BIT
+    else
+        0
+    end
+end
 
 ingest_fatal(ingestBit::Int) = (ingestBit & INGEST_FATAL_BITS) != 0
 
@@ -420,6 +533,40 @@ function validate_exposure(fspec, fivar, fmsk;
     return msk, starscale0, ingestBit
 end
 
+"""
+    read_fiber_relthrpt(f, fiberindx)
+
+AR's per-fiber relative throughput and quality bitmask for one fiber, from an
+open `ar1Duni*` file. Returns `(relthrpt, bitmsk_relthrpt)`.
+
+Both AR datasets are `(N_CHIPS, 300)`. They are collapsed ACROSS CHIPS
+aggressively: the bitmask is OR-ed (any chip broken => broken) and the
+throughput is the worst (minimum) finite chip value. Today AR writes the same
+chip-B solution into all three rows, so this is a no-op; it is written this way
+so that per-chip fluxing, if AR ever enables it, tightens the cut rather than
+silently loosening it.
+
+If the datasets are absent -- an `ar1Duni` written before AR propagated the flag
+-- returns `(NaN, AR_RELTHRPT_ABSENT)`. Absence is reported as UNKNOWN, never as
+good.
+"""
+function read_fiber_relthrpt(f, fiberindx)
+    (haskey(f, "relthrpt") && haskey(f, "bitmsk_relthrpt")) ||
+        return (NaN, AR_RELTHRPT_ABSENT)
+    thrpt_col = f["relthrpt"][:, fiberindx]
+    bits_col = f["bitmsk_relthrpt"][:, fiberindx]
+    bitmsk = reduce(|, Int.(bits_col); init = 0)
+    finite_thrpt = filter(isfinite, thrpt_col)
+    relthrpt = isempty(finite_thrpt) ? NaN : minimum(finite_thrpt)
+    # A non-finite entry on any chip is exactly the AR bug-1 case (a NaN fiber
+    # judged good); flag it here too, so an old reduction that predates the AR
+    # fix cannot slip a NaN fiber through as healthy.
+    if any(.!isfinite.(thrpt_col))
+        bitmsk |= AR_RELTHRPT_NOTFINITE_BIT
+    end
+    return (relthrpt, bitmsk)
+end
+
 function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     fiberindx = adjfiberindx2fiberindx(adjfiberindx)
     ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
@@ -427,8 +574,12 @@ function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     fspec = f["flux_1d"][:, fiberindx]
     fivar = f["ivar_1d"][:, fiberindx]
     fmsk = f["mask_1d"][:, fiberindx]
+    # AR's per-fiber, per-exposure throughput verdict has been sitting unread in
+    # this very file. It is the only record that a dead fiber was left UNSCALED
+    # by AR, so read it and carry it forward.
+    relthrpt, bitmsk_relthrpt = read_fiber_relthrpt(f, fiberindx)
     close(f)
-    metaexport = []
+    metaexport = (relthrpt = relthrpt, bitmsk_relthrpt = bitmsk_relthrpt)
     return fspec, fivar, fmsk, metaexport
 end
 

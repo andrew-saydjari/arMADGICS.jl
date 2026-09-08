@@ -25,6 +25,11 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
     simplemsk = falses(npix)
     fspec = fill(NaN, npix)
     fivar = fill(NaN, npix)
+    # AR's per-fiber throughput verdict. Defaults are the UNKNOWN sentinel, not a
+    # clean bill of health: if ingest throws before the file is opened we do not
+    # know the fiber's throughput and must not claim it was fine.
+    relthrpt = NaN
+    bitmsk_relthrpt = AR_RELTHRPT_ABSENT
 
     try
         out = []
@@ -41,10 +46,20 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
 
         # Get the Exposure (Visit) Spectrum
         fspec, fivar, fmsk, metaexport = getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
+        relthrpt = metaexport.relthrpt
+        bitmsk_relthrpt = metaexport.bitmsk_relthrpt
 
         # M2/M3: sanity-check the spectrum before it can poison or kill the solve;
         # validate_exposure also strips non-finite flux/ivar and tiny-ivar pixels
         fmsk_clean, starscale0, ingestBit = validate_exposure(fspec, fivar, fmsk)
+
+        # M-THRPT: AR's per-fiber, per-exposure throughput verdict. A fiber AR
+        # flagged unusable was left UNSCALED by AR, so its flux is on an arbitrary
+        # scale and its chi2 is nonsense; record that here so downstream analysis
+        # can mask it. Informational unless INGEST_RELTHRPT_FATAL is set, so by
+        # default this changes nothing about the reduction -- it only makes the
+        # condition legible.
+        ingestBit |= relthrpt_ingest_bits(bitmsk_relthrpt)
 
         simplemsk = fmsk_clean .& skymsk .& msk_local_skyLines
         # M1 fix: per-pixel snr is flux/sigma = flux.*sqrt.(ivar); the old
@@ -59,10 +74,10 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         if ingest_fatal(ingestBit)
             println("Skipping spectrum (ingestBit=$ingestBit) for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx")
             flush(stdout)
-            return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)))
+            return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)); relthrpt = relthrpt, bitmsk_relthrpt = bitmsk_relthrpt)
         end
 
-        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr, ingestBit, skyBit)) # 1
+        push!(out, (count(simplemsk), starscale0, skyscale0, nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk), count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])), simplemsk, nSkyFibers, snr, ingestBit, skyBit, relthrpt, bitmsk_relthrpt)) # 1
 
         if skyCont_off
             meanLocSky .= 0
@@ -292,7 +307,7 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         ingestBit |= INGEST_RUNTIME_ERROR_BIT
         println("Error in pipeline_single_spectra for tele=$tele, mjd=$mjd, expnum=$expnum, adjfiberindx=$adjfiberindx (recorded ingestBit=$ingestBit): ", sprint(showerror, e))
         flush(stdout)
-        return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)))
+        return failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, collect(length.(slvl_tuple)); relthrpt = relthrpt, bitmsk_relthrpt = bitmsk_relthrpt)
     end
 end
 
@@ -311,7 +326,7 @@ end
 const INGEST_FAIL_RV_FLAG = 2^6
 
 """
-    failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens)
+    failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens; relthrpt, bitmsk_relthrpt)
 
 Build a placeholder `out` with EXACTLY the same nesting/shapes as a successful
 `pipeline_single_spectra` return, so `extractor`/`multi_spectra_batch` can save
@@ -319,15 +334,20 @@ mixed success/failure batches. All science quantities are NaN (counts 0, masks
 false); the failure reason is carried in the `ingestBit` column (bit codes in
 src/ingest.jl), the sky-prior status in `skyBit`, and `RV_flag` is set to
 `INGEST_FAIL_RV_FLAG`.
+
+`relthrpt`/`bitmsk_relthrpt` default to the UNKNOWN sentinel, so a failure
+record that never got as far as opening the 1D file does not assert the fiber's
+throughput was fine.
 """
-function failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens)
+function failed_pipeline_out(simplemsk, starscale0, skyscale0, fspec, fivar, nSkyFibers, snr, ingestBit, skyBit, nstarcoef, lvllens;
+        relthrpt = NaN, bitmsk_relthrpt = AR_RELTHRPT_ABSENT)
     npix = length(simplemsk)
     out = []
-    # 1: meta block (mirrors the success push, incl. the ingestBit/skyBit columns)
+    # 1: meta block (mirrors the success push, incl. the ingestBit/skyBit/relthrpt columns)
     push!(out, (count(simplemsk), starscale0, skyscale0,
         nanify(fspec[simplemsk], simplemsk), nanify(fivar[simplemsk], simplemsk),
         count(isnan.(fspec[simplemsk])), count(isnan.(fivar[simplemsk])),
-        simplemsk, nSkyFibers, snr, ingestBit, skyBit))
+        simplemsk, nSkyFibers, snr, ingestBit, skyBit, relthrpt, bitmsk_relthrpt))
     # 2: RV block (sampler_1d_hierarchy_var shape)
     lvlouts = [((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG), fill(NaN, n), fill(NaN, n)) for n in lvllens]
     push!(out, ((NaN, NaN, NaN, NaN, 1, INGEST_FAIL_RV_FLAG, NaN), lvlouts))

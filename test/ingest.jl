@@ -174,6 +174,10 @@ end
     @test meta[8] === simplemsk
     @test meta[11] == ingestBit          # ingestBit column
     @test meta[12] == skyBit             # M-SKY skyBit column
+    # M-THRPT: a failure record that never opened the 1D file must report the
+    # fiber's throughput as UNKNOWN, not as good
+    @test isnan(meta[13])                # relthrpt column
+    @test meta[14] == AR_RELTHRPT_ABSENT # bitmsk_relthrpt column
     # RV block
     @test isnan(Float64.(out[2][1][1]))  # RV_pixoff_final
     @test out[2][1][6] == INGEST_FAIL_RV_FLAG
@@ -332,4 +336,157 @@ end
     nSky, meanL, V, mskloc, skyBit, mskSky, bits = combine_sky_fibers(ident, ones(npix, 4), trues(npix, 4))
     @test nSky == 4
     @test skyBit == 0
+end
+
+@testset "M-THRPT: AR per-fiber relthrpt flag ingest" begin
+    # bit translation: AR's per-fiber throughput bitmask -> ingestBit
+    @test relthrpt_ingest_bits(0) == 0                                     # healthy
+    @test relthrpt_ingest_bits(AR_RELTHRPT_WARN_BIT) == 0                  # low but usable
+    @test relthrpt_ingest_bits(AR_RELTHRPT_NOFILE_BIT) == 0                # relthrpt forced to 1
+    @test relthrpt_ingest_bits(AR_RELTHRPT_BROKEN_BIT) == INGEST_RELTHRPT_BROKEN_BIT
+    # a broken fiber virtually always also carries the warn bit; both must flag
+    @test relthrpt_ingest_bits(AR_RELTHRPT_WARN_BIT | AR_RELTHRPT_BROKEN_BIT) ==
+          INGEST_RELTHRPT_BROKEN_BIT
+    @test relthrpt_ingest_bits(AR_RELTHRPT_NOTFINITE_BIT) == INGEST_RELTHRPT_BROKEN_BIT
+    # absence is UNKNOWN, never good
+    @test relthrpt_ingest_bits(AR_RELTHRPT_ABSENT) == INGEST_RELTHRPT_UNKNOWN_BIT
+
+    # the default is informational: a throughput-broken fiber is still solved,
+    # so turning the flag on drops nothing from the reduction
+    if !INGEST_RELTHRPT_FATAL
+        @test !ingest_fatal(INGEST_RELTHRPT_BROKEN_BIT)
+        @test !ingest_fatal(INGEST_RELTHRPT_UNKNOWN_BIT)
+    end
+
+    # read_fiber_relthrpt against a real HDF5 file shaped like an ar1Duni product
+    mktempdir() do dir
+        nfib, nchip = 6, 3
+        thrpt = ones(nchip, nfib)
+        bits = zeros(Int, nchip, nfib)
+        thrpt[:, 2] .= 0.004                       # dead fiber
+        bits[:, 2] .= AR_RELTHRPT_WARN_BIT | AR_RELTHRPT_BROKEN_BIT
+        thrpt[:, 3] .= 0.71
+        bits[:, 3] .= AR_RELTHRPT_WARN_BIT         # low but usable
+        thrpt[2, 4] = NaN                          # non-finite on one chip only
+        bits[1, 5] = AR_RELTHRPT_BROKEN_BIT        # broken on ONE chip only
+
+        fn = joinpath(dir, "ar1Dunical_apo_57652_0010_object.h5")
+        h5open(fn, "w") do f
+            f["relthrpt"] = thrpt
+            f["bitmsk_relthrpt"] = bits
+        end
+
+        h5open(fn) do f
+            t, b = read_fiber_relthrpt(f, 1)
+            @test t == 1.0 && b == 0
+            @test relthrpt_ingest_bits(b) == 0
+
+            t, b = read_fiber_relthrpt(f, 2)
+            @test t ≈ 0.004
+            @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_BROKEN_BIT
+
+            t, b = read_fiber_relthrpt(f, 3)
+            @test t ≈ 0.71
+            @test relthrpt_ingest_bits(b) == 0     # warn-only is not broken
+
+            # a NaN on any chip is caught here even if AR's own bitmask missed it
+            # (that is AR's `NaN < x == false` bug, seen from the consumer side)
+            t, b = read_fiber_relthrpt(f, 4)
+            @test (b & AR_RELTHRPT_NOTFINITE_BIT) != 0
+            @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_BROKEN_BIT
+
+            # aggressive across chips: broken on one chip => broken
+            t, b = read_fiber_relthrpt(f, 5)
+            @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_BROKEN_BIT
+        end
+
+        # a product predating the flag must read back as UNKNOWN, not as good
+        old = joinpath(dir, "ar1Dunical_apo_57652_0011_object.h5")
+        h5open(old, "w") do f
+            f["flux_1d"] = zeros(4, nfib)
+        end
+        h5open(old) do f
+            t, b = read_fiber_relthrpt(f, 1)
+            @test isnan(t) && b == AR_RELTHRPT_ABSENT
+            @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_UNKNOWN_BIT
+        end
+    end
+end
+
+@testset "M-THRPT: sky-fiber pre-filter runs BEFORE the z-cut" begin
+    # AKS: "definitely mask broken fibers, then assess if need to drop more with z-cut"
+    npix = 1000
+    ncand = 8
+    rng = MersenneTwister(20260908)
+    base = 100.0 .+ randn(rng, npix, ncand)
+    ivar = ones(npix, ncand)
+    msk = trues(npix, ncand)
+
+    # no flag supplied (old reduction): behaviour is byte-for-byte the previous one
+    m0, n0, b0, f0 = select_sky_fibers(base, ivar, msk)
+    m1, n1, b1, f1 = select_sky_fibers(base, ivar, msk; bitmsk_relthrpt = nothing)
+    @test m0 == m1 && n0 == n1 && b0 == b1 && f0 == f1
+    @test n0 == ncand
+
+    # two AR-broken sky fibers: excluded, flagged per fiber and at exposure level
+    bits = zeros(Int, ncand)
+    bits[3] = AR_RELTHRPT_WARN_BIT | AR_RELTHRPT_BROKEN_BIT
+    bits[6] = AR_RELTHRPT_NOTFINITE_BIT
+    m, n, b, fb = select_sky_fibers(base, ivar, msk; bitmsk_relthrpt = bits)
+    @test !m[3] && !m[6]
+    @test n == ncand - 2
+    @test (fb[3] & SKYFIB_RELTHRPT_BIT) != 0
+    @test (fb[6] & SKYFIB_RELTHRPT_BIT) != 0
+    @test all(j -> (fb[j] & SKYFIB_RELTHRPT_BIT) == 0, [1, 2, 4, 5, 7, 8])
+
+    # warn-only and no-fluxing-file are NOT excluded: AR fluxed them (or forced
+    # relthrpt to exactly 1), so they are usable sky
+    softbits = zeros(Int, ncand)
+    softbits[2] = AR_RELTHRPT_WARN_BIT
+    softbits[5] = AR_RELTHRPT_NOFILE_BIT
+    m, n, b, fb = select_sky_fibers(base, ivar, msk; bitmsk_relthrpt = softbits)
+    @test n == ncand
+    @test all(fb .& SKYFIB_RELTHRPT_BIT .== 0)
+
+    # UNKNOWN (-1, field absent for this fiber) does not exclude either
+    unk = fill(AR_RELTHRPT_ABSENT, ncand)
+    m, n, b, fb = select_sky_fibers(base, ivar, msk; bitmsk_relthrpt = unk)
+    @test n == ncand
+
+    # ORDERING: a broken fiber must be gone BEFORE the z-cut median/IQR are formed.
+    # Here two dead fibers sit at ~0 while the rest cluster near 100 with a genuine
+    # 20-sigma outlier. Included, the dead pair inflates the IQR so much that the real
+    # outlier survives; pre-filtered, the z-cut catches it.
+    spec = 100.0 .+ 0.5 .* randn(rng, npix, ncand)
+    spec[:, 1] .= 0.4 .+ 0.01 .* randn(rng, npix)   # AR-broken, near dead
+    spec[:, 2] .= 0.4 .+ 0.01 .* randn(rng, npix)   # AR-broken, near dead
+    spec[:, 7] .= 130.0 .+ 0.5 .* randn(rng, npix)  # real scale outlier
+    brk = zeros(Int, ncand)
+    brk[1] = AR_RELTHRPT_BROKEN_BIT
+    brk[2] = AR_RELTHRPT_BROKEN_BIT
+
+    m_no, n_no, b_no, fb_no = select_sky_fibers(spec, ivar, msk)                    # old order
+    m_yes, n_yes, b_yes, fb_yes = select_sky_fibers(spec, ivar, msk; bitmsk_relthrpt = brk)
+
+    @test m_no[1] && m_no[2]                       # old: dead fibers entered the sky model
+    @test !m_yes[1] && !m_yes[2]                   # new: masked first
+    @test (fb_yes[7] & SKYFIB_ZCUT_BIT) != 0       # and the z-cut then finds the real outlier
+    @test (fb_no[7] & SKYFIB_ZCUT_BIT) == 0        # which it could not see before
+    @test (b_yes & SKY_ZCUT_FIBER_BIT) != 0
+
+    # masking more fibers can only push toward SKY_TOO_FEW_FIBERS: prove the count drops
+    allbrk = fill(AR_RELTHRPT_BROKEN_BIT, ncand)
+    m, n, b, fb = select_sky_fibers(base, ivar, msk; bitmsk_relthrpt = allbrk)
+    @test n == 0
+    @test (b & SKY_EXCLUDED_FIBER_BIT) != 0
+end
+
+@testset "M-THRPT: sky verdict print de-duplication" begin
+    empty!(SKY_VERDICT_REPORTED)
+    @test sky_verdict_report!("apo", "57652", "0010")
+    @test !sky_verdict_report!("apo", "57652", "0010")   # same exposure: silent
+    @test sky_verdict_report!("apo", "57652", "0011")    # different exposure: reported
+    @test sky_verdict_report!("lco", "57652", "0010")    # same mjd/exp, other telescope
+    empty!(SKY_VERDICT_REPORTED)
+    @test sky_verdict_report!("apo", "57652", "0010")    # reset works
 end
