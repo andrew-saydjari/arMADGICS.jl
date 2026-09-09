@@ -112,10 +112,11 @@ writes two new per-spectrum columns:
 
 AR's bit table (mirrored as `AR_RELTHRPT_*` in `src/ingest.jl`): 1 = low-throughput
 warn, 2 = broken (`relthrpt < 0.07`), 4 = no fluxing file (`relthrpt` forced to 1),
-8 = `relthrpt` non-finite. **`AR_RELTHRPT_UNUSABLE_BITS = 2 | 8`** is the aggressive
-cut, and is exactly the set AR refuses to flux-scale.
+8 = `relthrpt` non-finite, 16 = too few good pixels to measure throughput.
+**`AR_RELTHRPT_UNUSABLE_BITS = 2 | 8 | 16`** is the aggressive cut, and is exactly
+the set AR refuses to flux-scale.
 
-**How to mask chi2 analysis.** Cut on `(bitmsk_relthrpt & 10) != 0`, or
+**How to mask chi2 analysis.** Cut on `(bitmsk_relthrpt & 26) != 0`, or
 equivalently on `(ingestBit & 128) != 0`. Do NOT cut on bit 1 (warn) — those
 fibers are fluxed normally and are fine. Treat `bitmsk_relthrpt < 0` as UNKNOWN
 and report it separately rather than folding it into either bucket.

@@ -444,8 +444,10 @@ const AR_RELTHRPT_WARN_BIT = 2^0      # low throughput, still usable
 const AR_RELTHRPT_BROKEN_BIT = 2^1    # relthrpt < rel_val_cut: dead/near-dead fiber
 const AR_RELTHRPT_NOFILE_BIT = 2^2    # no fluxing file; relthrpt forced to exactly 1
 const AR_RELTHRPT_NOTFINITE_BIT = 2^3 # relthrpt NaN/Inf
+const AR_RELTHRPT_LOWGOODPIX_BIT = 2^4 # too few good pixels to measure throughput
 "Bits meaning AR did not (and could not) flux-scale the fiber. See AR src/ar1D.jl."
-const AR_RELTHRPT_UNUSABLE_BITS = AR_RELTHRPT_BROKEN_BIT | AR_RELTHRPT_NOTFINITE_BIT
+const AR_RELTHRPT_UNUSABLE_BITS = AR_RELTHRPT_BROKEN_BIT | AR_RELTHRPT_NOTFINITE_BIT |
+                                  AR_RELTHRPT_LOWGOODPIX_BIT
 "Sentinel `bitmsk_relthrpt` value used when the AR product does not carry the field."
 const AR_RELTHRPT_ABSENT = -1
 
