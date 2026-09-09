@@ -66,3 +66,58 @@ include("../scripts/prior_build/build_sky_defs.jl")
     skyivar_neg = copy(skyivar_sub); skyivar_neg[1, 1] = -1.0
     @test_throws ErrorException gspice_ivar_from_skyivar(skyivar_neg)
 end
+
+@testset "Sky-sample exposure-guard stamp (round trip)" begin
+    # The sampler stamps `exposure_guard` on skyflux_NNN.h5 and the builder's
+    # read_sky_sample reports it, so a prior built from unguarded samples is
+    # visibly labelled as such. This test round-trips a real HDF5 file because
+    # the reader is easy to get subtly wrong: HDF5.jl's `attrs(f)[name]` returns
+    # the attribute VALUE, and wrapping it in read() throws — which, swallowed
+    # by the reader's catch, silently downgrades a correctly-stamped sample dir
+    # to "no stamp". That is exactly the class of silent failure this guard
+    # exists to prevent, so it is pinned here.
+    mktempdir() do dir
+        # (a) properly stamped, guarded
+        h5open(joinpath(dir, "skyflux_295.h5"), "w") do f
+            f["skyflux"] = zeros(3, 2)
+            attrs(f)["exposure_guard"] = "EXPFLAG_NO_SCIENCE"
+            attrs(f)["exposure_guard_mask"] = EXPFLAG_NO_SCIENCE
+            attrs(f)["exposure_guard_almanac"] = "/some/decorated.h5"
+            attrs(f)["exposure_guard_unguarded_env"] = "0"
+        end
+        empty!(_SKY_GUARD_REPORTED)
+        @test_logs min_level = Base.CoreLogging.Warn begin
+            check_sky_sample_guard_stamp(dir, 295)   # guarded -> no warning
+        end
+
+        # (b) stamped but explicitly unguarded -> loud warning
+        dir2 = joinpath(dir, "unguarded"); mkpath(dir2)
+        h5open(joinpath(dir2, "skyflux_295.h5"), "w") do f
+            f["skyflux"] = zeros(3, 2)
+            attrs(f)["exposure_guard"] = "EXPFLAG_NO_SCIENCE"
+            attrs(f)["exposure_guard_almanac"] = "/some/undecorated.h5"
+            attrs(f)["exposure_guard_unguarded_env"] = "1"
+        end
+        empty!(_SKY_GUARD_REPORTED)
+        @test_logs (:warn, r"EXPLICITLY UNGUARDED") match_mode = :any begin
+            check_sky_sample_guard_stamp(dir2, 295)
+        end
+
+        # (c) no stamp at all (pre-2026-09-08 samples) -> loud warning
+        dir3 = joinpath(dir, "unstamped"); mkpath(dir3)
+        h5open(joinpath(dir3, "skyflux_295.h5"), "w") do f
+            f["skyflux"] = zeros(3, 2)
+        end
+        empty!(_SKY_GUARD_REPORTED)
+        @test_logs (:warn, r"UNGUARDED SKY SAMPLES") match_mode = :any begin
+            check_sky_sample_guard_stamp(dir3, 295)
+        end
+
+        # reported once per sample dir, not once per fiber
+        empty!(_SKY_GUARD_REPORTED)
+        check_sky_sample_guard_stamp(dir3, 295)
+        @test_logs min_level = Base.CoreLogging.Warn begin
+            check_sky_sample_guard_stamp(dir3, 295)
+        end
+    end
+end

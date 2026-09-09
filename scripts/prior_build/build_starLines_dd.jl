@@ -2,6 +2,13 @@
 ## This is really a one node script, multi-node is not really necessary for this task.
 # Author - Andrew Saydjari, CfA
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: **UNGUARDED GAP**. This builder is data-driven from a
+# PREVIOUS apMADGICS run's outputs (past_run + DR17 map2visit/map2star), which carry no
+# link back to an almanac exposure row, so bad/engineering exposures cannot be excluded
+# here today. Closing it needs a visit-level join that does not exist yet.
+# See README "Exposure-Level Science Guard (prior builds)".
+
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 Pkg.activate("../../"); Pkg.instantiate(); Pkg.precompile()

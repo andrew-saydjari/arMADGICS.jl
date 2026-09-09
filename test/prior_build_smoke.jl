@@ -33,6 +33,14 @@ isdefined(Main, :build_skyCont) || include("../scripts/prior_build/build_sky_def
     else
         mjd = "60000"
         sample_runs = Tuple{String,Int,String}[] # (tele, adjfib, sample out_dir) for E5
+        # The 2026_05_01 almanac was decorated BEFORE the engineering bit existed
+        # (it has exposure_class/.../predicted_bad but no exposure_flags), so the
+        # 2026-09-08 exposure-level science guard correctly refuses to run against
+        # it. This smoke test exercises sampler/builder PLUMBING on real data, not
+        # sample purity, so it runs explicitly unguarded. This is the one
+        # legitimate use of the escape hatch; test/ingest.jl proves that WITHOUT
+        # the env var the undecorated path throws.
+        ENV[ALMANAC_UNDECORATED_ENV] = "1"
         for tele in ("apo", "lco")
             run_lst = get_telemjd_runlist_from_almanac(almanacFile, tele, mjd, accepted_fibtypes=["sky"])
             @test !isempty(run_lst)
@@ -145,5 +153,7 @@ isdefined(Main, :build_skyCont) || include("../scripts/prior_build/build_sky_def
                     ", npix_submsk=", count(submsk), ", λv[1]=", λv[1])
             end
         end
+        # leave the process clean: the escape hatch must not leak into other testsets
+        delete!(ENV, ALMANAC_UNDECORATED_ENV)
     end
 end

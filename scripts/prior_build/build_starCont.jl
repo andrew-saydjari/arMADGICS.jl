@@ -1,6 +1,10 @@
 ## This is script grabs uses the samples from sample_starCont.jl to build a covariance matrix prior for the star continuum
 # Author - Andrew Saydjari,
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: n/a here — consumes sample_starCont.jl's synthetic
+# draws. Guarded transitively via build_tfunlists.jl's C4 cut. See README.
+
 import Pkg;
 using Dates;
 t0 = now();

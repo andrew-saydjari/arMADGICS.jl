@@ -1,6 +1,10 @@
 ## This is script generates a bunch of high resolution model spectra using Korg. These are samples for the starLines prior when on the first pass using pure theory models.
 # Author - Andrew Saydjari, CfA
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: n/a — purely synthetic (Korg) spectra; no observed
+# exposures enter. See README "Exposure-Level Science Guard (prior builds)".
+
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 Pkg.activate("../../"); Pkg.instantiate(); Pkg.precompile()
