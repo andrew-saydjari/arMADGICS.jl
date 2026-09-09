@@ -183,7 +183,7 @@ println("results written to $out_h5")
 ## Batch-extraction contract check (post-fix code only): run the multi_spectra_batch
 ## extraction lambdas (kept in sync with pipeline.jl RVextract) over the mixed
 ## success/failure outs to catch shape/type mismatches that would crash a real batch save.
-if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 12
+if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 14
     metai = 1
     RVind, RVchi, RVcom, strpo = 2, 3, 4, 5
     adjfiberindx = 0 # dummy for the contract check
@@ -200,6 +200,8 @@ if all(x -> x !== nothing, outs) && length(outs[1][1]) >= 12
         (x -> x[metai][10], "snr"),
         (x -> x[metai][11], "ingestBit"),
         (x -> x[metai][12], "skyBit"),
+        (x -> x[metai][13], "relthrpt"),
+        (x -> x[metai][14], "bitmsk_relthrpt"),
         (x -> adjfiberindx, "adjfiberindx"),
         (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
         (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),

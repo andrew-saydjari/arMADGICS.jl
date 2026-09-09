@@ -266,6 +266,13 @@ end
                 (x -> x[metai][10], "snr"),
                 (x -> x[metai][11], "ingestBit"), # M2: per-spectrum ingest/failure code (bits in src/ingest.jl)
                 (x -> x[metai][12], "skyBit"), # M-SKY: exposure-level sky-prior status (bits in src/ingest.jl)
+                # M-THRPT: AR's per-FIBER, per-EXPOSURE relative throughput and its
+                # quality bitmask, read straight out of the ar1Duni file. Mask chi2
+                # analysis on `(bitmsk_relthrpt & 2) != 0` (broken): AR leaves such a
+                # fiber UNSCALED, so its chi2 is meaningless. -1 means the field was
+                # absent from the reduction, i.e. UNKNOWN, not good.
+                (x -> x[metai][13], "relthrpt"),
+                (x -> x[metai][14], "bitmsk_relthrpt"),
                 (x -> adjfiberindx, "adjfiberindx"),
                 (x -> Float64.(x[RVind][1][1]), "RV_pixoff_final"),
                 (x -> Float64.(x[RVind][1][3]), "RV_pixoff_disc_final"),

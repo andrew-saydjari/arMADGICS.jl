@@ -44,7 +44,10 @@ A bump makes every existing entry a miss (different key -> different path), so s
 entries can never be silently reused. `test/sky_cache.jl` pins this constant against a
 checksum of the guard source so a silent semantic change fails CI.
 """
-const SKY_CACHE_SCHEMA = 1
+# v2: sky-fiber selection now hard-masks fibers AR flagged throughput-broken BEFORE
+#     the z-cut runs (SKYFIB_RELTHRPT_BIT / SKY_RELTHRPT_FIBER_BIT). Every v1 entry
+#     encodes the old, pre-filter-free verdict and must miss.
+const SKY_CACHE_SCHEMA = 2
 
 """
     sky_cache_root()
@@ -262,9 +265,35 @@ function compute_sky_bundle(reduxBase, tele, mjd, expnum, almanacFile; skyZcut =
     skyspec = f["flux_1d"][:, skyfibIndxs]
     skyivar = f["ivar_1d"][:, skyfibIndxs]
     skymskmat = f["mask_1d"][:, skyfibIndxs]
+    # AR's per-fiber throughput verdict for the SAME candidate sky columns, in the same
+    # order. `nothing` when the reduction predates the flag, which DISABLES the
+    # pre-filter rather than pretending every fiber is healthy.
+    sky_bitmsk_relthrpt = if haskey(f, "relthrpt") && haskey(f, "bitmsk_relthrpt")
+        bits = f["bitmsk_relthrpt"]   # (N_CHIPS, N_FIBERS)
+        thrpt = f["relthrpt"]
+        [begin
+             acc = reduce(|, Int.(bits[:, ix]); init = 0)
+             any(.!isfinite.(thrpt[:, ix])) && (acc |= AR_RELTHRPT_NOTFINITE_BIT)
+             acc
+         end
+         for ix in skyfibIndxs]
+    else
+        nothing
+    end
     close(f)
 
-    mskSky, nSkyFibers, skyBit, skyFibBits = select_sky_fibers(skyspec, skyivar, skymskmat; skyZcut = skyZcut)
+    mskSky, nSkyFibers, skyBit,
+    skyFibBits = select_sky_fibers(skyspec, skyivar, skymskmat;
+        skyZcut = skyZcut, bitmsk_relthrpt = sky_bitmsk_relthrpt)
+    if any(b -> (b & SKYFIB_RELTHRPT_BIT) != 0, skyFibBits)
+        skyBit |= SKY_RELTHRPT_FIBER_BIT
+    end
+
+    # NOTHING IS PRINTED HERE, ON PURPOSE (see `getSky4visit`). `skyBit` and
+    # `skyFibBits` ARE the verdict, they are returned to the caller, and `skyBit` is
+    # written out as a per-spectrum column of every batch product. The log is no
+    # longer the record; `test/regression/arm_census.jl` in ApogeeReduction reads the
+    # products instead.
     surv = findall(mskSky)
     return (skyfibIndxs = collect(Int, skyfibIndxs), skyFibBits = collect(Int, skyFibBits),
         mskSky = collect(Bool, mskSky), skyBit = Int(skyBit), nSkyFibers = Int(nSkyFibers),
