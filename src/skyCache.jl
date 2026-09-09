@@ -289,43 +289,16 @@ function compute_sky_bundle(reduxBase, tele, mjd, expnum, almanacFile; skyZcut =
         skyBit |= SKY_RELTHRPT_FIBER_BIT
     end
 
-    # De-spam (AKS): the sky-guard verdict is EXPOSURE-level but `getSky4visit` is
-    # invoked once per TARGET FIBER, so printing there reprinted the same line ~130x
-    # (measured: 479,570 log lines, 3,676 unique). Print it HERE instead -- at the site
-    # where the verdict is actually computed -- so a cache hit is silent. The message
-    # text and the `skyBit=N` form are UNCHANGED on purpose: the AR-side diagnostic
-    # census (arm_census.sh, AR PR #395) greps this exact stream, and de-spamming must
-    # not make it blind. `sky_verdict_reported` additionally dedupes within a worker
-    # process, so the reduction holds even when the on-disk sky cache is disabled.
-    if skyBit != 0 && sky_verdict_report!(tele, mjd, expnum)
-        flagged = [(skyfibIndxs[j], skyFibBits[j]) for j in findall(skyFibBits .!= 0)]
-        println("getSky4visit: sky guard flagged tele=$tele, mjd=$mjd, expnum=$expnum: skyBit=$skyBit, (fiberindx, skyFibBit)=$flagged")
-        flush(stdout)
-    end
-
+    # NOTHING IS PRINTED HERE, ON PURPOSE (see `getSky4visit`). `skyBit` and
+    # `skyFibBits` ARE the verdict, they are returned to the caller, and `skyBit` is
+    # written out as a per-spectrum column of every batch product. The log is no
+    # longer the record; `test/regression/arm_census.jl` in ApogeeReduction reads the
+    # products instead.
     surv = findall(mskSky)
     return (skyfibIndxs = collect(Int, skyfibIndxs), skyFibBits = collect(Int, skyFibBits),
         mskSky = collect(Bool, mskSky), skyBit = Int(skyBit), nSkyFibers = Int(nSkyFibers),
         survspec = skyspec[:, surv], survivar = skyivar[:, surv],
         survmsk = Bool.(skymskmat[:, surv]))
-end
-
-# Process-local record of which (tele, mjd, expnum) sky verdicts this worker has already
-# printed. n.b. a per-PROCESS Dict under pmap/Distributed, NOT a per-thread buffer
-# indexed by threadid(). Bounded by the number of exposures a worker touches.
-const SKY_VERDICT_REPORTED = Set{Tuple{String, String, String}}()
-
-"""
-    sky_verdict_report!(tele, mjd, expnum)
-
-`true` the first time this worker process is asked about an exposure, `false`
-afterwards. Used only to suppress repeated printing; it never changes a verdict.
-"""
-function sky_verdict_report!(tele, mjd, expnum)
-    key = (string(tele), string(mjd), string(expnum))
-    key in SKY_VERDICT_REPORTED && return false
-    push!(SKY_VERDICT_REPORTED, key)
-    return true
 end
 
 """

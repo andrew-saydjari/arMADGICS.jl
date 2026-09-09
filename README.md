@@ -166,13 +166,34 @@ not just the sky fibers that triggered it.
 | 8   | 3   | No sky fibers at all (`SKY_NO_FIBERS_BIT`) |
 | 16  | 4   | At least one KEPT fiber has a non-positive median (`SKY_NEGSCALE_FIBER_BIT`) |
 | 32  | 5   | The sky decomposition went non-finite (`SKY_NONFINITE_DECOMP_BIT`) |
+| 64  | 6   | At least one candidate sky fiber excluded by AR's per-fiber throughput flag, before the z-cut (`SKY_RELTHRPT_FIBER_BIT`) |
 
 Bits 4 and 8 are set together when an exposure has no usable sky fibers, so
 `skyBit = 12` means the sky model was skipped entirely.
 
 Note bit 16 is informational: those fibers are **kept**. It flags that a fiber
 with a non-positive median entered the sky model, which is not by itself an
-error but is worth screening on.
+error but is worth screening on. Bit 64 is not informational: those fibers are
+removed.
+
+### The sky-guard verdict is NOT logged. Read it from the products.
+
+`getSky4visit` used to print one line per TARGET FIBER for a verdict that is
+EXPOSURE-level: measured on job 7001233, **479,570 lines covering 3,676 distinct
+exposures** — a ~130x duplication that was 98% of the job log and made naive line
+counts overstate the problem by the same factor. That print is now **suppressed
+entirely**.
+
+No information is lost. `skyBit` *is* the verdict and it is a per-spectrum column
+of every batch product, so the exposure-level truth is recoverable exactly, per
+exposure. Unlike a log it cannot be rotated, truncated, duplicated by an
+append-mode resume, or silently invalidated by someone rewording a `println`.
+
+To census it, use ApogeeReduction `test/regression/arm_census.jl` (invoked by
+`arm_census.sh`), which reads `ingestBit` and `skyBit` out of the batch products.
+**Report the unique-exposure count, not the per-spectrum count**: every spectrum
+of an exposure carries the same `skyBit`, so the per-spectrum number is inflated
+by the fiber multiplicity — exactly the distortion the old log duplication caused.
 
 ### Observed distribution (DR21 200-MJD testbed, 1,622,474 spectra)
 

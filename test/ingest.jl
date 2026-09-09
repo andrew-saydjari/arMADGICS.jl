@@ -481,12 +481,3 @@ end
     @test (b & SKY_EXCLUDED_FIBER_BIT) != 0
 end
 
-@testset "M-THRPT: sky verdict print de-duplication" begin
-    empty!(SKY_VERDICT_REPORTED)
-    @test sky_verdict_report!("apo", "57652", "0010")
-    @test !sky_verdict_report!("apo", "57652", "0010")   # same exposure: silent
-    @test sky_verdict_report!("apo", "57652", "0011")    # different exposure: reported
-    @test sky_verdict_report!("lco", "57652", "0010")    # same mjd/exp, other telescope
-    empty!(SKY_VERDICT_REPORTED)
-    @test sky_verdict_report!("apo", "57652", "0010")    # reset works
-end

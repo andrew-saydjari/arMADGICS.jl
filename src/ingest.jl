@@ -325,11 +325,19 @@ function getSky4visit(reduxBase, tele, mjd, expnum, almanacFile, skymsk, V_skyli
     skyBit = bundle.skyBit
     nSkyFibers = bundle.nSkyFibers
     skyFibBits = bundle.skyFibBits
-    # The "sky guard flagged" line used to be printed HERE, once per target fiber, which
-    # reprinted one exposure-level verdict ~130x (98% of the job log). It now prints from
-    # `compute_sky_bundle`, at the site where the verdict is computed, with identical
-    # text so the AR-side log census keeps working. Nothing is lost: the verdict also
-    # rides out per spectrum in the `skyBit` output column.
+    # The "getSky4visit: sky guard flagged ..." line used to be printed HERE, once per
+    # TARGET FIBER, for a verdict that is EXPOSURE-level. Measured on job 7001233:
+    # 479,570 lines covering 3,676 distinct exposures -- a ~130x duplication that was
+    # 98% of the job log and made naive line counts overstate the problem by the same
+    # factor.
+    #
+    # It is now SUPPRESSED ENTIRELY, not merely de-duplicated, and no information is
+    # lost: `skyBit` IS the verdict, and it is written out as a per-spectrum column of
+    # every batch product, so the exposure-level truth is recoverable exactly from the
+    # products. Unlike a log, that record cannot be rotated, truncated, duplicated by
+    # an append-mode resume, or silently invalidated by someone rewording a println.
+    # ApogeeReduction `test/regression/arm_census.jl` reads those columns.
+    # Per-fiber detail (`skyFibBits`) remains available in-process to any caller.
     if nSkyFibers < min_fibers
         return skyskip(skyBit | SKY_TOO_FEW_FIBERS_BIT)
     end
