@@ -2,6 +2,9 @@
 ## This is really a one node script, multi-node is not really necessary for this task.
 # Author - Andrew Saydjari, CfA
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: n/a — built from synthetic Korg samples. See README.
+
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 Pkg.activate("../../"); Pkg.instantiate(); Pkg.precompile()

@@ -481,3 +481,105 @@ end
     @test (b & SKY_EXCLUDED_FIBER_BIT) != 0
 end
 
+
+@testset "Exposure-level science guard (bad/engineering exclusion from prior samples)" begin
+    # AKS 2026-09-08: no prior build after a first pass may consume exposures whose
+    # flags say bad or engineering. These tests exist so the guard cannot be
+    # quietly removed: deleting the filter, the throw, or a bit from
+    # EXPFLAG_NO_SCIENCE turns one of them red.
+
+    @test EXPFLAG_PREDICTED_BAD == 0x01
+    @test EXPFLAG_ENGINEERING == 0x02
+    @test (EXPFLAG_NO_SCIENCE & EXPFLAG_PREDICTED_BAD) != 0
+    @test (EXPFLAG_NO_SCIENCE & EXPFLAG_ENGINEERING) != 0
+
+    r = exposure_science_exclusion_reasons(UInt8[0x00, 0x01, 0x02, 0x03, 0x03])
+    @test r.n_predicted_bad == 1
+    @test r.n_engineering == 1
+    @test r.n_both == 2
+    @test r.n_excluded == 4
+
+    # ---- fixture almanac: 6 object exposures, 1 predicted_bad, 1 engineering ----
+    mjd = "58588"
+    tele = "apo"
+    nexp = 6
+    function write_guard_fixture(path; flags = UInt8[0x00, 0x00, 0x01, 0x00, 0x02, 0x03],
+            decorate = true, expflags_dataset = true)
+        h5open(path, "w") do f
+            g = create_group(f, "raw/$(tele)/$(mjd)/exposures")
+            g["exposure"] = collect(1:nexp)
+            g["image_type"] = fill("object", nexp)
+            g["plate_id"] = fill(9999, nexp)
+            g["config_id"] = fill(9999, nexp)
+            g["n_read"] = fill(47, nexp)
+            g["chip_flags"] = fill(7, nexp)
+            g["flagged_bad"] = zeros(Int, nexp)
+            gf = create_group(f, "raw/$(tele)/$(mjd)/fibers/9999")
+            gf["fiber_id"] = [301 - i for i in 1:300]
+            gf["category"] = [i <= 12 ? "sky" : "science" for i in 1:300]
+            gf["sdss_id"] = collect(1:300)
+            gf["fiber_type"] = fill("APOGEE", 300)
+            if decorate
+                gc = create_group(f, "exposure_class/$(tele)/$(mjd)")
+                gc["exposure"] = collect(1:nexp)
+                gc["predicted_bad"] = UInt8.((flags .& EXPFLAG_PREDICTED_BAD) .!= 0)
+                expflags_dataset && (gc["exposure_flags"] = flags)
+            end
+        end
+        return path
+    end
+
+    mktempdir() do dir
+        # (a) decorated almanac: the flagged exposures are excluded from the runlist
+        alm = write_guard_fixture(joinpath(dir, "decorated.h5"))
+        h5open(alm, "r") do f
+            fl = read_exposure_science_flags(f, tele, mjd, collect(1:nexp))
+            @test fl == UInt8[0x00, 0x00, 0x01, 0x00, 0x02, 0x03]
+        end
+        run_lst = get_telemjd_runlist_from_almanac(alm, tele, mjd;
+            accepted_fibtypes = ["sci"])
+        kept = sort(unique([r.expnum for r in run_lst]))
+        @test kept == [1, 2, 4]           # 3 (bad), 5 (engineering), 6 (both) dropped
+        @test !(3 in kept)
+        @test !(5 in kept)
+        @test !(6 in kept)
+
+        cen = almanac_science_exposure_census(alm, [(tele, mjd)]; label = "unit test")
+        @test cen.n_object == nexp
+        @test cen.n_excluded == 3
+        @test cen.n_predicted_bad == 1
+        @test cen.n_engineering == 1
+        @test cen.n_both == 1
+        @test length(cen.excluded) == 3
+
+        # (b) UNDECORATED almanac must THROW rather than silently pass everything
+        alm2 = write_guard_fixture(joinpath(dir, "undecorated.h5"); decorate = false)
+        @test_throws ErrorException get_telemjd_runlist_from_almanac(alm2, tele, mjd;
+            accepted_fibtypes = ["sci"])
+
+        # (c) an exposure_class group predating the engineering bit (predicted_bad
+        #     only, no exposure_flags) is NOT good enough — the engineering verdict
+        #     is absent, so it must throw too
+        alm3 = write_guard_fixture(joinpath(dir, "preeng.h5"); expflags_dataset = false)
+        @test_throws ErrorException get_telemjd_runlist_from_almanac(alm3, tele, mjd;
+            accepted_fibtypes = ["sci"])
+
+        # (d) the escape hatch works, and is the ONLY way past an undecorated almanac
+        withenv(ALMANAC_UNDECORATED_ENV => "1") do
+            @test almanac_undecorated_allowed()
+            rl = get_telemjd_runlist_from_almanac(alm2, tele, mjd;
+                accepted_fibtypes = ["sci"])
+            @test sort(unique([r.expnum for r in rl])) == collect(1:nexp)
+        end
+        @test !almanac_undecorated_allowed()
+
+        # (e) tuple-keyed lookup (used by build_tfunlists' C4 cut)
+        fl, fbad, nmiss = almanac_exposure_science_flags(alm,
+            [(tele, mjd, 1), (tele, mjd, 5), (tele, mjd, 99), ("lco", mjd, 1)])
+        @test fl[1] == 0x00
+        @test fl[2] == EXPFLAG_ENGINEERING
+        @test fl[3] == 0x00
+        @test all(.!fbad)
+        @test nmiss == 2   # exposure 99 and the absent lco night
+    end
+end

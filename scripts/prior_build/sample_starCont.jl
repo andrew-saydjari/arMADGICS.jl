@@ -1,6 +1,13 @@
 ## This is script grabs a bunch of transfer functions and telluric components fit to domeflats for building the starContinuum prior. (For apMADGICS we used HOT STD stars instead)
 # Author - Andrew Saydjari
 
+
+# EXPOSURE-LEVEL SCIENCE GUARD: this entry point CANNOT apply the bad/engineering
+# guard itself — it never sees an exposure identity, only telluric transfer-function
+# refits indexed by row. It is guarded transitively: build_tfunlists.jl applies the
+# C4 exposure guard when producing tfun_sample_lst. See README "Exposure-Level
+# Science Guard (prior builds)".
+
 import Pkg;
 using Dates;
 t0 = now();
