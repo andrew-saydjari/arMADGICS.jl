@@ -424,9 +424,15 @@ const INGEST_TINY_IVAR_RELFAC = 1e-6
 #   2^8 AR's per-fiber throughput flag was ABSENT from the ar1Duni file (a
 #       reduction older than the flag). This is NOT a clean bill of health: fiber
 #       throughput is UNKNOWN and must not be silently treated as good.
+#   2^9 AR found NO fluxing file (same-night same-cart domeflat) for this
+#       exposure (AR NOFILE bit): relthrpt is forced to exactly 1 and the flux
+#       is on an arbitrary per-fiber scale. Whole-exposure condition (fires on
+#       every fiber at once). Informational, never fatal: the spectrum is
+#       solved normally (AKS decision, option b).
 const INGEST_RUNTIME_ERROR_BIT = 2^0
 const INGEST_RELTHRPT_BROKEN_BIT = 2^7
 const INGEST_RELTHRPT_UNKNOWN_BIT = 2^8
+const INGEST_RELTHRPT_NOFILE_BIT = 2^9
 
 # ---------------------------------------------------------------------------
 # ApogeeReduction per-FIBER relative-throughput bitmask (`bitmsk_relthrpt`)
@@ -481,16 +487,28 @@ Translate AR's per-fiber throughput bitmask into `ingestBit` bits.
 
 A negative value (`AR_RELTHRPT_ABSENT`, i.e. the field was not in the file) maps
 to `INGEST_RELTHRPT_UNKNOWN_BIT`, never to "good": a reduction that never
-measured the fiber has not earned a clean verdict.
+measured the fiber has not earned a clean verdict. ABSENT does NOT map to
+NOFILE: "the product predates the flag" and "AR looked and found no domeflat"
+are different statements.
+
+The remaining bits compose by OR: a fiber that is both throughput-broken and on
+a no-domeflat exposure carries `INGEST_RELTHRPT_BROKEN_BIT` AND
+`INGEST_RELTHRPT_NOFILE_BIT`. The NOFILE bit is purely informational (never in
+`INGEST_FATAL_BITS`, not gated by `INGEST_RELTHRPT_FATAL`): the spectrum is
+solved normally, its flux is simply labeled as being on an arbitrary scale.
 """
 function relthrpt_ingest_bits(bitmsk_relthrpt::Integer)
     if bitmsk_relthrpt < 0
-        INGEST_RELTHRPT_UNKNOWN_BIT
-    elseif (bitmsk_relthrpt & AR_RELTHRPT_UNUSABLE_BITS) != 0
-        INGEST_RELTHRPT_BROKEN_BIT
-    else
-        0
+        return INGEST_RELTHRPT_UNKNOWN_BIT
     end
+    out = 0
+    if (bitmsk_relthrpt & AR_RELTHRPT_UNUSABLE_BITS) != 0
+        out |= INGEST_RELTHRPT_BROKEN_BIT
+    end
+    if (bitmsk_relthrpt & AR_RELTHRPT_NOFILE_BIT) != 0
+        out |= INGEST_RELTHRPT_NOFILE_BIT
+    end
+    return out
 end
 
 ingest_fatal(ingestBit::Int) = (ingestBit & INGEST_FATAL_BITS) != 0

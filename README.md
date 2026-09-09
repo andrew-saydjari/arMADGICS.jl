@@ -82,15 +82,17 @@ spectrum was still fitted.
 | 64  | 6   | `starscale0 = nanzeromedian(flux)` non-finite or <= 0 | **yes** |
 | 128 | 7   | ApogeeReduction flagged this FIBER's relative throughput unusable on this exposure (`INGEST_RELTHRPT_BROKEN_BIT`) | opt-in |
 | 256 | 8   | AR's per-fiber throughput flag was ABSENT from the `ar1Duni` file (`INGEST_RELTHRPT_UNKNOWN_BIT`) | |
+| 512 | 9   | relthrpt fluxing file absent for the exposure (AR NOFILE); flux on arbitrary per-fiber scale; spectrum solved normally (`INGEST_RELTHRPT_NOFILE_BIT`) | |
 
 `INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6`, plus `2^7` when
-`INGEST_RELTHRPT_FATAL` is on.
+`INGEST_RELTHRPT_FATAL` is on. Bit 9 is never fatal — it is not gated by
+`INGEST_RELTHRPT_FATAL`, which is scoped to bit 7 only.
 
 A skipped spectrum is written out with NaN products and `RV_flag = 64`
 (`INGEST_FAIL_RV_FLAG`, `src/pipelineCore.jl`). Before bits 7 and 8 existed,
 **`ingestBit != 0` and `RV_flag == 64` were equivalent** — verified exactly on
-the DR21 200-MJD testbed, 1,708 spectra of 1,622,474, both directions. Bits 7
-and 8 are informational by default and therefore **break that equivalence**: the
+the DR21 200-MJD testbed, 1,708 spectra of 1,622,474, both directions. Bits 7–9
+are informational by default and therefore **break that equivalence**: the
 correct statement is now `ingest_fatal(ingestBit) <=> RV_flag == 64`.
 
 ### Per-fiber throughput (`relthrpt`, `bitmsk_relthrpt`, `ingestBit` bit 7)
@@ -120,6 +122,18 @@ the set AR refuses to flux-scale.
 equivalently on `(ingestBit & 128) != 0`. Do NOT cut on bit 1 (warn) — those
 fibers are fluxed normally and are fine. Treat `bitmsk_relthrpt < 0` as UNKNOWN
 and report it separately rather than folding it into either bucket.
+
+**NOFILE (`ingestBit` bit 9, value 512).** When AR finds no same-night
+same-cart domeflat for an exposure (`get_fluxing_file` returns nothing), it
+forces `relthrpt = 1` on every fiber and sets its NOFILE bit: the exposure is
+never flux-scaled, so every spectrum's flux is on an arbitrary per-fiber
+scale. arM records this as `INGEST_RELTHRPT_NOFILE_BIT` and **solves the
+spectrum normally** — a flagged-but-produced spectrum is more useful than an
+absent one. It is a whole-exposure condition (all 300 fibers x 3 chips at
+once; 8 of 8,895 object exposures = 0.090% on the DR21 200-MJD testbed, all
+plate-era cart-coverage gaps). It composes by OR with bit 7: a
+throughput-broken fiber on a no-domeflat exposure carries both. ABSENT
+(`bitmsk_relthrpt = -1`) still maps to bit 8 UNKNOWN, never to NOFILE.
 
 **What this does NOT change.** By default bit 7 is informational: the spectrum is
 still solved, still written, and no exposure or fiber is dropped from the

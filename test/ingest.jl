@@ -342,14 +342,24 @@ end
     # bit translation: AR's per-fiber throughput bitmask -> ingestBit
     @test relthrpt_ingest_bits(0) == 0                                     # healthy
     @test relthrpt_ingest_bits(AR_RELTHRPT_WARN_BIT) == 0                  # low but usable
-    @test relthrpt_ingest_bits(AR_RELTHRPT_NOFILE_BIT) == 0                # relthrpt forced to 1
+    # NOFILE (no domeflat -> relthrpt forced to 1, flux unscaled) is recorded,
+    # not ignored: AKS option (b) -- flag it in ingestBit, still solve
+    @test relthrpt_ingest_bits(AR_RELTHRPT_NOFILE_BIT) == INGEST_RELTHRPT_NOFILE_BIT
     @test relthrpt_ingest_bits(AR_RELTHRPT_BROKEN_BIT) == INGEST_RELTHRPT_BROKEN_BIT
     # a broken fiber virtually always also carries the warn bit; both must flag
     @test relthrpt_ingest_bits(AR_RELTHRPT_WARN_BIT | AR_RELTHRPT_BROKEN_BIT) ==
           INGEST_RELTHRPT_BROKEN_BIT
     @test relthrpt_ingest_bits(AR_RELTHRPT_NOTFINITE_BIT) == INGEST_RELTHRPT_BROKEN_BIT
-    # absence is UNKNOWN, never good
+    # NOFILE composes by OR with a genuinely-broken bit: both must be present
+    @test relthrpt_ingest_bits(AR_RELTHRPT_NOFILE_BIT | AR_RELTHRPT_BROKEN_BIT) ==
+          (INGEST_RELTHRPT_BROKEN_BIT | INGEST_RELTHRPT_NOFILE_BIT)
+    # NOFILE plus warn stays NOFILE-only (warn never escalates)
+    @test relthrpt_ingest_bits(AR_RELTHRPT_NOFILE_BIT | AR_RELTHRPT_WARN_BIT) ==
+          INGEST_RELTHRPT_NOFILE_BIT
+    # absence is UNKNOWN, never good -- and never NOFILE: "product predates the
+    # flag" and "AR looked and found no domeflat" are different statements
     @test relthrpt_ingest_bits(AR_RELTHRPT_ABSENT) == INGEST_RELTHRPT_UNKNOWN_BIT
+    @test (relthrpt_ingest_bits(AR_RELTHRPT_ABSENT) & INGEST_RELTHRPT_NOFILE_BIT) == 0
 
     # the default is informational: a throughput-broken fiber is still solved,
     # so turning the flag on drops nothing from the reduction
@@ -357,6 +367,10 @@ end
         @test !ingest_fatal(INGEST_RELTHRPT_BROKEN_BIT)
         @test !ingest_fatal(INGEST_RELTHRPT_UNKNOWN_BIT)
     end
+    # NOFILE is informational by decision, REGARDLESS of the fatal switch:
+    # ARM_RELTHRPT_FATAL is scoped to the broken bit only
+    @test !ingest_fatal(INGEST_RELTHRPT_NOFILE_BIT)
+    @test (INGEST_FATAL_BITS & INGEST_RELTHRPT_NOFILE_BIT) == 0
 
     # read_fiber_relthrpt against a real HDF5 file shaped like an ar1Duni product
     mktempdir() do dir
@@ -369,6 +383,7 @@ end
         bits[:, 3] .= AR_RELTHRPT_WARN_BIT         # low but usable
         thrpt[2, 4] = NaN                          # non-finite on one chip only
         bits[1, 5] = AR_RELTHRPT_BROKEN_BIT        # broken on ONE chip only
+        bits[:, 6] .= AR_RELTHRPT_NOFILE_BIT       # no domeflat: relthrpt forced to 1
 
         fn = joinpath(dir, "ar1Dunical_apo_57652_0010_object.h5")
         h5open(fn, "w") do f
@@ -398,6 +413,11 @@ end
             # aggressive across chips: broken on one chip => broken
             t, b = read_fiber_relthrpt(f, 5)
             @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_BROKEN_BIT
+
+            # NOFILE exposure: relthrpt is exactly 1, flagged but not broken
+            t, b = read_fiber_relthrpt(f, 6)
+            @test t == 1.0 && b == AR_RELTHRPT_NOFILE_BIT
+            @test relthrpt_ingest_bits(b) == INGEST_RELTHRPT_NOFILE_BIT
         end
 
         # a product predating the flag must read back as UNKNOWN, not as good
