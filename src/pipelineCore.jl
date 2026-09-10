@@ -60,6 +60,12 @@ function pipeline_single_spectra(argtup, prior_vec; caching=true, sky_caching=fa
         # default this changes nothing about the reduction -- it only makes the
         # condition legible.
         ingestBit |= relthrpt_ingest_bits(bitmsk_relthrpt)
+        # Fluxing-file provenance (exposure-level): flag a flux scale derived
+        # from a same-cart-but-interrupted domeflat. ABSORBED into ingestBit
+        # only -- the raw bitmsk_relFluxFile is deliberately not replicated
+        # into arM outputs (rejoin the 1D product via tele/mjd/expnum).
+        # Informational, never fatal.
+        ingestBit |= relflux_ingest_bits(metaexport.bitmsk_relFluxFile)
 
         simplemsk = fmsk_clean .& skymsk .& msk_local_skyLines
         # M1 fix: per-pixel snr is flux/sigma = flux.*sqrt.(ivar); the old

@@ -82,15 +82,18 @@ spectrum was still fitted.
 | 64  | 6   | `starscale0 = nanzeromedian(flux)` non-finite or <= 0 | **yes** |
 | 128 | 7   | ApogeeReduction flagged this FIBER's relative throughput unusable on this exposure (`INGEST_RELTHRPT_BROKEN_BIT`) | opt-in |
 | 256 | 8   | AR's per-fiber throughput flag was ABSENT from the `ar1Duni` file (`INGEST_RELTHRPT_UNKNOWN_BIT`) | |
+| 512 | 9   | relthrpt fluxing file absent for the exposure (AR NOFILE); flux on arbitrary per-fiber scale; spectrum solved normally (`INGEST_RELTHRPT_NOFILE_BIT`) | |
+| 1024 | 10 | fluxing domeflat is same-cart but the cart changed between it and the exposure (AR provenance CARTCHANGE); flux scale real but from an interrupted flat; spectrum solved normally (`INGEST_RELFLUX_INTERRUPTED_BIT`) | |
 
 `INGEST_FATAL_BITS = 2^0 | 2^1 | 2^2 | 2^6`, plus `2^7` when
-`INGEST_RELTHRPT_FATAL` is on.
+`INGEST_RELTHRPT_FATAL` is on. Bits 9 and 10 are never fatal — neither is gated
+by `INGEST_RELTHRPT_FATAL`, which is scoped to bit 7 only.
 
 A skipped spectrum is written out with NaN products and `RV_flag = 64`
 (`INGEST_FAIL_RV_FLAG`, `src/pipelineCore.jl`). Before bits 7 and 8 existed,
 **`ingestBit != 0` and `RV_flag == 64` were equivalent** — verified exactly on
-the DR21 200-MJD testbed, 1,708 spectra of 1,622,474, both directions. Bits 7
-and 8 are informational by default and therefore **break that equivalence**: the
+the DR21 200-MJD testbed, 1,708 spectra of 1,622,474, both directions. Bits 7–10
+are informational by default and therefore **break that equivalence**: the
 correct statement is now `ingest_fatal(ingestBit) <=> RV_flag == 64`.
 
 ### Per-fiber throughput (`relthrpt`, `bitmsk_relthrpt`, `ingestBit` bit 7)
@@ -120,6 +123,40 @@ the set AR refuses to flux-scale.
 equivalently on `(ingestBit & 128) != 0`. Do NOT cut on bit 1 (warn) — those
 fibers are fluxed normally and are fine. Treat `bitmsk_relthrpt < 0` as UNKNOWN
 and report it separately rather than folding it into either bucket.
+
+**NOFILE (`ingestBit` bit 9, value 512).** When AR finds no same-night
+same-cart domeflat for an exposure (`get_fluxing_file` returns nothing), it
+forces `relthrpt = 1` on every fiber and sets its NOFILE bit: the exposure is
+never flux-scaled, so every spectrum's flux is on an arbitrary per-fiber
+scale. arM records this as `INGEST_RELTHRPT_NOFILE_BIT` and **solves the
+spectrum normally** — a flagged-but-produced spectrum is more useful than an
+absent one. It is a whole-exposure condition (all 300 fibers x 3 chips at
+once; 8 of 8,895 object exposures = 0.090% on the DR21 200-MJD testbed, all
+plate-era cart-coverage gaps). It composes by OR with bit 7: a
+throughput-broken fiber on a no-domeflat exposure carries both. ABSENT
+(`bitmsk_relthrpt = -1`) still maps to bit 8 UNKNOWN, never to NOFILE.
+
+**Fluxing-file provenance (`ingestBit` bit 10, value 1024).** AR's
+`get_fluxing_file` records HOW the fluxing domeflat was located, written
+per exposure as `metadata["bitmsk_relFluxFile"]` in the 1D products. It
+returns exactly one of three states: `2^0` CONTIG — the exposure itself is a
+valid fluxing domeflat, or the nearest valid one (before or after) is
+same-cart with the cart unchanged across every exposure in between; `2^1`
+CARTCHANGE — a same-cart domeflat exists on the night, but the cart was
+swapped out and back between it and the exposure; `2^2` NOFILE — no
+same-night same-cart domeflat at all (also returned when the
+`valid_domeflats4fluxing` index is missing or lacks the tele/mjd). arM maps
+only the degraded CARTCHANGE state to `INGEST_RELFLUX_INTERRUPTED_BIT`; CONTIG
+sets nothing, and NOFILE is already bit 9, keyed on `bitmsk_relthrpt` (the
+value AR actually acts on), so it is never double-encoded from this metadata.
+ABSENT metadata (products predating the field) sets nothing — this is
+informational provenance, and absence of provenance is not evidence of
+degradation; contrast the deliberate relthrpt rule where ABSENT maps to bit 8
+UNKNOWN because that flag is a quality verdict. **arM ABSORBS this provenance
+into `ingestBit` and does NOT replicate the raw `bitmsk_relFluxFile` column
+into arM outputs** — downstream joins back to the 1D product via
+tele/mjd/expnum if the raw value is needed. Never fatal; in no exclusion or
+chi2 mask; the solve path is untouched — exactly like bit 9.
 
 **What this does NOT change.** By default bit 7 is informational: the spectrum is
 still solved, still written, and no exposure or fiber is dropped from the
