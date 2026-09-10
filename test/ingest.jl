@@ -433,6 +433,60 @@ end
     end
 end
 
+@testset "M-RELFLUX: AR fluxing-file provenance ingest" begin
+    # bit translation: AR's exposure-level get_fluxing_file provenance -> ingestBit.
+    # get_fluxing_file returns exactly one of three values, never an OR.
+    @test relflux_ingest_bits(AR_RELFLUX_FILE_CONTIG_BIT) == 0          # clean: no bit
+    @test relflux_ingest_bits(AR_RELFLUX_FILE_CARTCHANGE_BIT) ==
+          INGEST_RELFLUX_INTERRUPTED_BIT                                # degraded: flagged
+    # NOFILE is bit 9's job, keyed on bitmsk_relthrpt (the value AR acts on);
+    # never double-encoded from this metadata
+    @test relflux_ingest_bits(AR_RELFLUX_FILE_NOFILE_BIT) == 0
+    # ABSENT provenance sets NOTHING (informational; absence != degradation) --
+    # deliberately the opposite of the relthrpt ABSENT -> UNKNOWN rule
+    @test relflux_ingest_bits(AR_RELFLUX_FILE_ABSENT) == 0
+
+    # informational by decision: never fatal, regardless of ARM_RELTHRPT_FATAL
+    @test !ingest_fatal(INGEST_RELFLUX_INTERRUPTED_BIT)
+    @test (INGEST_FATAL_BITS & INGEST_RELFLUX_INTERRUPTED_BIT) == 0
+
+    # read_relflux_provenance against real HDF5 files shaped like ar1Duni products
+    mktempdir() do dir
+        # metadata group carrying the field (AR writes it as an Int scalar)
+        fn = joinpath(dir, "ar1Dunical_apo_57652_0012_object.h5")
+        h5open(fn, "w") do f
+            g = create_group(f, "metadata")
+            g["bitmsk_relFluxFile"] = AR_RELFLUX_FILE_CARTCHANGE_BIT
+        end
+        h5open(fn) do f
+            v = read_relflux_provenance(f)
+            @test v == AR_RELFLUX_FILE_CARTCHANGE_BIT
+            @test relflux_ingest_bits(v) == INGEST_RELFLUX_INTERRUPTED_BIT
+        end
+
+        # metadata group present but predating the field -> ABSENT, no bit
+        old = joinpath(dir, "ar1Dunical_apo_57652_0013_object.h5")
+        h5open(old, "w") do f
+            g = create_group(f, "metadata")
+            g["wavecal_type"] = "fpi"
+        end
+        h5open(old) do f
+            v = read_relflux_provenance(f)
+            @test v == AR_RELFLUX_FILE_ABSENT
+            @test relflux_ingest_bits(v) == 0
+        end
+
+        # no metadata group at all -> ABSENT, no bit
+        older = joinpath(dir, "ar1Dunical_apo_57652_0014_object.h5")
+        h5open(older, "w") do f
+            f["flux_1d"] = zeros(4, 6)
+        end
+        h5open(older) do f
+            @test read_relflux_provenance(f) == AR_RELFLUX_FILE_ABSENT
+        end
+    end
+end
+
 @testset "M-THRPT: sky-fiber pre-filter runs BEFORE the z-cut" begin
     # AKS: "definitely mask broken fibers, then assess if need to drop more with z-cut"
     npix = 1000

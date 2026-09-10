@@ -429,10 +429,16 @@ const INGEST_TINY_IVAR_RELFAC = 1e-6
 #       is on an arbitrary per-fiber scale. Whole-exposure condition (fires on
 #       every fiber at once). Informational, never fatal: the spectrum is
 #       solved normally (AKS decision, option b).
+#   2^10 AR's fluxing-file provenance says the domeflat used to flux this
+#       exposure is same-cart but NOT contiguous: the cart changed between the
+#       exposure and the domeflat (get_fluxing_file returned 2^1). The flux
+#       scale is real but from a flat across a cart swap. Informational, never
+#       fatal (AKS decision, option a: surface the existing provenance bits).
 const INGEST_RUNTIME_ERROR_BIT = 2^0
 const INGEST_RELTHRPT_BROKEN_BIT = 2^7
 const INGEST_RELTHRPT_UNKNOWN_BIT = 2^8
 const INGEST_RELTHRPT_NOFILE_BIT = 2^9
+const INGEST_RELFLUX_INTERRUPTED_BIT = 2^10
 
 # ---------------------------------------------------------------------------
 # ApogeeReduction per-FIBER relative-throughput bitmask (`bitmsk_relthrpt`)
@@ -509,6 +515,56 @@ function relthrpt_ingest_bits(bitmsk_relthrpt::Integer)
         out |= INGEST_RELTHRPT_NOFILE_BIT
     end
     return out
+end
+
+# ---------------------------------------------------------------------------
+# ApogeeReduction fluxing-file provenance (`metadata["bitmsk_relFluxFile"]`)
+#
+# Mirrors the return values of `get_fluxing_file` in ApogeeReduction.jl
+# `src/ar1D.jl` (duplicated here for the same no-compile-time-AR-dependency
+# reason as the AR_RELTHRPT_* block above). It is an EXPOSURE-level value
+# recording HOW the domeflat used for relative fluxing was located, written by
+# `process_1D` into the 1D product metadata. `get_fluxing_file` returns exactly
+# ONE of three values, never an OR:
+#   2^0 CONTIG: the exposure itself is a valid fluxing domeflat, or the nearest
+#       valid domeflat (before or after) is same-cart with the cart unchanged
+#       across every exposure in between.
+#   2^1 CARTCHANGE: a same-cart domeflat exists on the night, but the cart was
+#       swapped out and back between the exposure and that domeflat.
+#   2^2 NOFILE: no same-night same-cart domeflat at all (also returned when the
+#       valid_domeflats4fluxing index file is missing or lacks the tele/mjd).
+# ---------------------------------------------------------------------------
+const AR_RELFLUX_FILE_CONTIG_BIT = 2^0
+const AR_RELFLUX_FILE_CARTCHANGE_BIT = 2^1
+const AR_RELFLUX_FILE_NOFILE_BIT = 2^2
+"Sentinel for a 1D product whose metadata predates `bitmsk_relFluxFile`."
+const AR_RELFLUX_FILE_ABSENT = -1
+
+"""
+    relflux_ingest_bits(bitmsk_relFluxFile)
+
+Translate AR's fluxing-file provenance into `ingestBit` bits. Only the degraded
+CARTCHANGE state maps to a bit (`INGEST_RELFLUX_INTERRUPTED_BIT`); the clean
+CONTIG state sets nothing.
+
+ABSENT (negative sentinel) also sets NOTHING. This is deliberately the opposite
+of the relthrpt rule (`AR_RELTHRPT_ABSENT` -> UNKNOWN): `bitmsk_relthrpt` is a
+quality verdict, so its absence withholds a clean bill of health, whereas
+`bitmsk_relFluxFile` is informational provenance, and the absence of provenance
+is not evidence of degradation.
+
+NOFILE is deliberately NOT translated here. The no-domeflat condition is
+already `INGEST_RELTHRPT_NOFILE_BIT` (bit 9), keyed on the per-fiber
+`bitmsk_relthrpt` -- the value AR actually acts on when it declines to
+flux-scale. If the two sources ever disagree (metadata says NOFILE but the
+relthrpt bits are clean, or vice versa), the relthrpt bitmask wins for bit 9
+and this function stays silent, so the disagreement cannot double- or
+contradictorily encode.
+"""
+function relflux_ingest_bits(bitmsk_relFluxFile::Integer)
+    bitmsk_relFluxFile < 0 && return 0
+    (bitmsk_relFluxFile & AR_RELFLUX_FILE_CARTCHANGE_BIT) != 0 ?
+        INGEST_RELFLUX_INTERRUPTED_BIT : 0
 end
 
 ingest_fatal(ingestBit::Int) = (ingestBit & INGEST_FATAL_BITS) != 0
@@ -599,6 +655,21 @@ function read_fiber_relthrpt(f, fiberindx)
     return (relthrpt, bitmsk)
 end
 
+"""
+    read_relflux_provenance(f)
+
+AR's exposure-level fluxing-file provenance (`bitmsk_relFluxFile`) from the
+`metadata` group of an open `ar1Duni*` file. Returns `AR_RELFLUX_FILE_ABSENT`
+when the group or the field is missing (a product predating the field); see
+`relflux_ingest_bits` for why absence sets no ingest bit.
+"""
+function read_relflux_provenance(f)
+    haskey(f, "metadata") || return AR_RELFLUX_FILE_ABSENT
+    meta = f["metadata"]
+    haskey(meta, "bitmsk_relFluxFile") || return AR_RELFLUX_FILE_ABSENT
+    return Int(read(meta["bitmsk_relFluxFile"]))
+end
+
 function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     fiberindx = adjfiberindx2fiberindx(adjfiberindx)
     ar1Dfname = get_1Duni_name(reduxBase, tele, mjd, expnum)
@@ -610,8 +681,13 @@ function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     # this very file. It is the only record that a dead fiber was left UNSCALED
     # by AR, so read it and carry it forward.
     relthrpt, bitmsk_relthrpt = read_fiber_relthrpt(f, fiberindx)
+    # Exposure-level fluxing-file provenance. ABSORBED into ingestBit (see
+    # relflux_ingest_bits), never replicated as an arM output column: rejoin the
+    # 1D product via tele/mjd/expnum if the raw value is needed downstream.
+    bitmsk_relFluxFile = read_relflux_provenance(f)
     close(f)
-    metaexport = (relthrpt = relthrpt, bitmsk_relthrpt = bitmsk_relthrpt)
+    metaexport = (relthrpt = relthrpt, bitmsk_relthrpt = bitmsk_relthrpt,
+        bitmsk_relFluxFile = bitmsk_relFluxFile)
     return fspec, fivar, fmsk, metaexport
 end
 
