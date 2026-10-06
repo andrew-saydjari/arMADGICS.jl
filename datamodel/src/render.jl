@@ -166,7 +166,10 @@ function change_li(c::Change)
     if c.kind === :removed_column
         return "<b>COLUMN REMOVED:</b> $(code(pc)) — are we sure we don't want this column?"
     elseif c.kind === :new_column
-        return "<b>NEW COLUMN:</b> $(code(pc)) ($(esc(c.new))) — needs a description in $(code(isempty(c.note) ? "the registry" : c.note))"
+        reg = code(isempty(c.note) ? "the registry" : c.note)
+        c.old == "documented" &&
+            return "<b>NEW COLUMN:</b> $(code(pc)) ($(esc(c.new))) — already described in $reg; confirm the entry is current"
+        return "<b>NEW COLUMN:</b> $(code(pc)) ($(esc(c.new))) — needs a description in $reg"
     elseif c.kind === :dtype_changed
         return "<b>DTYPE CHANGED:</b> $(code(pc)) $(code(c.old)) → $(code(c.new))"
     elseif c.kind === :shape_changed

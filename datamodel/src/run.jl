@@ -101,7 +101,10 @@ function run_release(config_path::AbstractString;
         println(io, "  comparing against previous snapshot: ", prev_path, " (release ", previous_label, ")")
         for c in diff_snapshots(prev, snap)
             if c.kind === :new_column && haskey(schemas, c.product)
-                c = Change(c.kind, c.product, c.column, c.old, c.new, regfile(c.product))
+                col = getcolumn(schemas[c.product], c.column)
+                r = resolve_column(c.column, regs[c.product], col, harvested[c.product])
+                c = Change(c.kind, c.product, c.column, r.source === :undocumented ? "" : "documented",
+                           c.new, regfile(c.product))
             end
             push!(changes, c)
         end

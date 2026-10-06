@@ -133,6 +133,8 @@ function banner_line(c::Change)
         return "COLUMN REMOVED: $pc — are we sure we don't want this column?"
     elseif c.kind === :new_column
         reg = isempty(c.note) ? "the registry" : c.note
+        c.old == "documented" &&
+            return "NEW COLUMN: $pc ($(c.new)) — already described in $reg; confirm the entry is current"
         return "NEW COLUMN: $pc ($(c.new)) — needs a description in $reg"
     elseif c.kind === :dtype_changed
         return "DTYPE CHANGED: $pc  $(c.old) -> $(c.new) — intended? downstream readers may break"

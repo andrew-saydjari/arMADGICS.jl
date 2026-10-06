@@ -8,6 +8,7 @@
 #   --outdir DIR            where to write index.html and the product pages (required)
 #   --previous FILE         snapshot to diff against (default: newest snapshots/<v>.toml with v < release)
 #   --snapshot-dir DIR      where snapshots live / are written (default: datamodel/snapshots)
+#   --registry-dir DIR      curated registry directory (default: datamodel/registry)
 #   --no-snapshot           do not write snapshots/<release>.toml (dry run)
 #   --accept-changes        acknowledge schema changes vs the previous release (exit 0 instead of 2)
 #   --allow-undocumented    publish with UNDOCUMENTED badges (exit 0 instead of 3)
@@ -31,6 +32,8 @@ function parse_cli(args)
             opts["outdir"] = args[i+1]; i += 2
         elseif a == "--previous"
             opts["previous"] = args[i+1]; i += 2
+        elseif a == "--registry-dir"
+            opts["registry_dir"] = args[i+1]; i += 2
         elseif a == "--snapshot-dir"
             opts["snapshot_dir"] = args[i+1]; i += 2
         elseif a == "--no-snapshot"
@@ -56,6 +59,7 @@ function main(args)
                           :allow_undocumented => o["allow_undoc"], :write_snapshot_file => o["snapshot"])
     haskey(o, "previous") && (kw[:previous] = o["previous"])
     haskey(o, "snapshot_dir") && (kw[:snapshot_dir] = o["snapshot_dir"])
+    haskey(o, "registry_dir") && (kw[:registry_dir] = o["registry_dir"])
     code, _ = run_release(cfg; kw...)
     return code
 end
