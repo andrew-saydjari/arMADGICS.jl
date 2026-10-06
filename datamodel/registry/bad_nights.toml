@@ -1,0 +1,39 @@
+# Curated column registry: public/bad_nights.csv
+
+[product]
+title = "Night-level exclusion list"
+summary = "141 (telescope, MJD) nights with a night-level failure; source of `qa_bitmask` bit 0 (`BAD_NIGHT`)."
+general_description = """
+Nights on which every exposure of one telescope should be excluded: bad or mode-slipped wavelength solutions, catastrophic wavelength solutions, sky-line fit failures, commissioning-flagged exposure sets, trace-extraction jumps, and one night of duplicated stale detector frames. Every row of `allExposure_pass1_dr21.h5` whose (`tele`, `mjd`) appears here has `qa_bitmask` bit 0 set.
+"""
+naming_convention = "`bad_nights.csv`"
+row_definition = "one row per (telescope, MJD)"
+written_by = ["public exclusion-list builder (`build_public_lists.jl`), from the wavelength-calibration census and the trace anomaly search"]
+read_by = ["allExposure `qa_bitmask` (`s10_add_galactic_qa.py`)"]
+column_order = ["tele", "mjd", "class", "reason", "source"]
+
+[columns.tele]
+description = "Telescope: `apo` or `lco`."
+
+[columns.mjd]
+units = "d"
+description = "SDSS observing-night MJD."
+
+[columns.class]
+description = "Failure class(es), semicolon-separated when more than one applies."
+values = [
+  { value = "FPI_MODE_SLIP", meaning = "FPI-based wavelength solution slipped by one FPI mode on at least one fiber" },
+  { value = "CATASTROPHIC", meaning = "the adopted wavelength solution has a within-exposure residual scatter far above normal" },
+  { value = "SKY_BAD_WELL", meaning = "sky-line wavelength solution sits in (or mixes with) the wrong χ² well: many fibers, or a whole chip, offset by more than 1 Å" },
+  { value = "SKY_FIBER_OFF", meaning = "sky-line wavelength solution: a few fibers offset by more than 1 Å" },
+  { value = "AMBIGUOUS_ARB", meaning = "arbitration between wavelength solutions is uncertain for many fibers" },
+  { value = "WAVECAL_BROKEN", meaning = "wavelength calibration unusable for the night" },
+  { value = "TRACE_JUMP", meaning = "trace extraction jumped for the night" },
+  { value = "COMMISSIONING_FLAGGED", meaning = "exposure set flagged as commissioning" },
+]
+
+[columns.reason]
+description = "Free-text evidence for the classification (census statistics, affected chips, counts)."
+
+[columns.source]
+description = "Internal provenance: the analysis table(s) the row came from, semicolon-separated. Not a file in the release."
