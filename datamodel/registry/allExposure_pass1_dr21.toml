@@ -1,0 +1,336 @@
+# Curated column registry: allExposure_pass1_dr21.h5
+# Human-maintained source of truth for units / descriptions / flag tables.
+# Description precedence at render time: this file > dataset `description` attribute > release docs.
+
+[product]
+title = "Per-exposure, per-fiber summary table (almanac metadata + arMADGICS velocities)"
+summary = "One row per exposure × fiber: identifiers, observing metadata, topocentric and barycentric velocities, and quality flags."
+general_description = """
+The exposure-level summary of the release. Each row is one fiber on one exposure, identified by (`tele`, `mjd`, `expnum`, `adjfiberindx`). The table joins three things row for row: the almanac's per-exposure and per-fiber metadata (targeting identifiers, positions, instrument state), the scalar outputs of the arMADGICS.jl workup that determine the velocity (`RV_pixoff_final`, `RV_pix_var`, `RV_flag`, `ingestBit`, `snr`), and the derived velocities in both frames (`v_rel` topocentric, `v_rad` barycentric, `v_rad_corr` barycentric with the per-fiber zero point removed).
+
+Row `i` of this file is row `i` of every `arMADGICS_out_<key>.h5` file, so this table is also the index for the spectra and spectral components in those files.
+
+Start from the default quality mask in `RECOMMENDED_CUTS.md`: `qa_bitmask == 0`, `ingestBit == 0`, `RV_flag == 0`, `bary_flag == 0`, `isfinite(v_rad)`, `offtarget == 0`. It keeps 25,207,025 of the 26,715,540 rows.
+"""
+naming_convention = "`allExposure_pass1_dr21.h5`: one file for the whole release; `pass1` is the processing pass and `dr21` the data release it feeds."
+row_definition = "one row per (telescope, MJD, exposure, fiber), row-aligned with every `arMADGICS_out_<key>.h5`"
+written_by = [
+  "allExposure builder (`s6_build_allexposure.py`: almanac join, barycentric correction, velocities)",
+  "`s9_add_flags.py` (`bary_flag`), `s10_add_galactic_qa.py` (`glon`, `glat`, `qa_bitmask`)",
+  "off-target sidecar (`offtarget`), fiber-offset application (`v_rad_offset_applied`, `v_rad_corr`, `v_rad_corr_flag`)",
+]
+read_by = [
+  "allVisitRV builder (`allVisitRV_pass1_dr21.h5`)",
+  "fiber zero-point fit (`fiber_offsets.csv`)",
+]
+attrs_description = "Root attributes of the file. The `*_codes` attributes define the integer codes used by the columns of the same name."
+column_order = [
+  "tele", "mjd", "expnum", "adjfiberindx", "fiber_index_almanac", "era",
+  "sdss_id", "sdss_id_workup", "sdss_id_agrees", "catalogid", "category", "hole_type",
+  "ra", "dec", "glon", "glat", "lambda_eff", "x_focal", "y_focal",
+  "image_type", "config_id", "plate_id", "design_id", "field_id", "cart_id", "map_id",
+  "fps", "n_read", "flagged_bad", "chip_flags", "seeing", "focus", "collpist", "colpitch",
+  "dithered_pixels", "mjd_mid_exposure", "join_status",
+  "RV_pixoff_final", "RV_pix_var", "v_rel", "v_barycentric_correction", "v_rad", "e_v_rad",
+  "v_rad_offset_applied", "v_rad_corr", "v_rad_corr_flag",
+  "snr", "RV_flag", "ingestBit", "bary_flag", "qa_bitmask", "offtarget",
+]
+examples = """
+Julia (HDF5.jl), applying the default mask:
+
+```
+using HDF5
+f = h5open("data/work/mwm/0.4.0/public/allExposure_pass1_dr21.h5", "r")
+col(k) = read(f[k])
+good = (col("qa_bitmask") .== 0) .& (col("ingestBit") .== 0) .& (col("RV_flag") .== 0) .&
+       (col("bary_flag") .== 0) .& isfinite.(col("v_rad")) .& (col("offtarget") .== 0)
+v_rad = col("v_rad")[good]
+```
+
+Python (h5py):
+
+```
+import h5py, numpy as np
+with h5py.File("data/work/mwm/0.4.0/public/allExposure_pass1_dr21.h5", "r") as f:
+    c = {k: f[k][:] for k in ["qa_bitmask", "ingestBit", "RV_flag", "bary_flag", "v_rad", "offtarget"]}
+good = ((c["qa_bitmask"] == 0) & (c["ingestBit"] == 0) & (c["RV_flag"] == 0)
+        & (c["bary_flag"] == 0) & np.isfinite(c["v_rad"]) & (c["offtarget"] == 0))
+```
+
+Fetching the spectrum of row `i` (same `i` in every `arMADGICS_out_<key>.h5`):
+
+```
+flux = h5open(f -> f["flux"][:, i], "data/work/mwm/0.4.0/arMADGICS_out_flux.h5")      # Julia
+flux = h5py.File("data/work/mwm/0.4.0/arMADGICS_out_flux.h5")["flux"][i, :]          # Python, 0-based i
+```
+"""
+
+[product.attr_notes]
+velocity_convention = "How `v_rel`, `v_barycentric_correction` and `v_rad` relate."
+fiber_index_convention = "Relation between `adjfiberindx` and `fiber_index_almanac`."
+qa_bitmask_codes = "Bit definitions of `qa_bitmask`."
+era_codes = "Codes of `era`."
+tele_codes = "Codes of `tele`."
+join_status_codes = "Codes of `join_status`."
+sdss_id_agrees_codes = "Codes of `sdss_id_agrees`."
+n_rows = "Number of rows in every column."
+recommended_cut = "Covers `bary_flag` only. The release default mask is broader; see `RECOMMENDED_CUTS.md`."
+
+# ---------------------------------------------------------------- identity
+
+[columns.tele]
+description = "Telescope."
+values = [ { value = 1, meaning = "APO (apo25m)" }, { value = 2, meaning = "LCO (lco25m)" } ]
+
+[columns.mjd]
+units = "d"
+description = "SDSS observing-night MJD (integer). Not the exposure time; see `mjd_mid_exposure`."
+
+[columns.expnum]
+description = "Exposure number within the night, as in the raw file name and the almanac `exposure` field."
+
+[columns.adjfiberindx]
+description = "Fiber index across both telescopes: 1–300 are APO fibers, 301–600 are LCO fibers. The per-telescope product fiber index is `adjfiberindx - 300*(tele-1)`, which is the `fiber` used by the CSVs and `allVisitRV`."
+
+[columns.fiber_index_almanac]
+description = "Fiber index in the almanac fiber tables (= APOGEE FIBERID), 1–300 per telescope. It runs the other way from the product index: `fiber_index_almanac = 301 - (adjfiberindx - 300*(tele-1))`. This mapping reproduces the almanac `sdss_id` on 100% of rows where both sides carry one."
+
+[columns.era]
+description = "Survey era of the exposure."
+values = [ { value = 1, meaning = "plate era" }, { value = 2, meaning = "FPS (robotic fiber positioner) era" } ]
+
+[columns.sdss_id]
+description = "SDSS-V target identifier from the almanac fiber table at this row's fiber. This is the identifier to group a star's exposures by."
+null = "-1 where the fiber has no assigned target (sky, unplugged and unassigned fibers)."
+
+[columns.sdss_id_workup]
+description = "Target identifier carried through the arMADGICS.jl run for this row. Kept to cross-check the join; compare with `sdss_id` via `sdss_id_agrees`."
+null = "-1 where none was assigned."
+
+[columns.sdss_id_agrees]
+description = "Whether `sdss_id` (almanac) and `sdss_id_workup` agree. The 1,012 disagreeing rows are all APO plate era, MJD 58036–58049; they also carry `bary_flag` bit 2."
+values = [ { value = 1, meaning = "agree" }, { value = 2, meaning = "disagree" }, { value = 3, meaning = "untestable: one side is <= 0" } ]
+
+[columns.catalogid]
+description = "SDSS-V `catalogid` from the almanac fiber table."
+null = "-1 where the almanac fiber table has no catalogid (most plate-era rows and non-target fibers)."
+
+[columns.category]
+description = "Target category from the almanac fiber table, stored as an integer code; the code list is the `categories` attribute of the dataset (code = position in the list, starting at 0)."
+
+[columns.hole_type]
+description = "Fiber hole type from the almanac fiber table, stored as an integer code; the code list is the `categories` attribute of the dataset (code = position in the list, starting at 0). Plate-era fibers are `object` or `unplugged`; FPS-era fibers are `fps`."
+
+[columns.ra]
+units = "deg"
+description = "Right ascension (ICRS) of the assigned target, from the almanac fiber table. For `offtarget == 1` rows this is the assigned position, not where the fiber pointed."
+null = "NaN where the almanac carries no position."
+
+[columns.dec]
+units = "deg"
+description = "Declination (ICRS) of the assigned target, from the almanac fiber table. For `offtarget == 1` rows this is the assigned position, not where the fiber pointed."
+null = "NaN where the almanac carries no position."
+
+[columns.glon]
+units = "deg"
+description = "Galactic longitude, from (`ra`, `dec`) via astropy `SkyCoord(...).galactic`."
+null = "NaN where `ra` or `dec` is not finite."
+
+[columns.glat]
+units = "deg"
+description = "Galactic latitude, from (`ra`, `dec`) via astropy `SkyCoord(...).galactic`."
+null = "NaN where `ra` or `dec` is not finite."
+
+[columns.lambda_eff]
+units = "Å"
+description = "Effective wavelength for which the fiber position was computed (the wavelength the plate hole or robot position was optimized for), from the almanac fiber table. Typically 16000 Å for APOGEE fibers."
+null = "0 where not recorded."
+
+[columns.x_focal]
+units = "mm"
+description = "x coordinate of the fiber in the focal plane, from the almanac fiber table."
+
+[columns.y_focal]
+units = "mm"
+description = "y coordinate of the fiber in the focal plane, from the almanac fiber table."
+
+# ---------------------------------------------------------------- exposure metadata (almanac)
+
+[columns.image_type]
+description = "Exposure image type from the almanac, stored as an integer code; the code list is the `categories` attribute of the dataset. Every row of this table is an `object` exposure."
+
+[columns.config_id]
+description = "FPS configuration id of the exposure (almanac)."
+null = "-1 in the plate era."
+
+[columns.plate_id]
+description = "Plate id of the exposure (almanac)."
+null = "-1 in the FPS era, except for plate-plugged configurations observed after the switch, which carry both ids."
+
+[columns.design_id]
+description = "FPS design id of the exposure (almanac)."
+null = "-1 in the plate era."
+
+[columns.field_id]
+description = "Field id of the exposure (almanac)."
+null = "-1 where absent."
+
+[columns.cart_id]
+description = "Cartridge id (almanac). FPS exposures carry 0 (the header value `FPS`)."
+null = "-1 where absent."
+
+[columns.map_id]
+description = "Plate mapping id (almanac): which plugging of the plate this exposure used."
+null = "-1 where absent (FPS era)."
+
+[columns.fps]
+description = "1 if the exposure is in the FPS era by date (almanac: MJD at or after the FPS start for that observatory), else 0."
+
+[columns.n_read]
+description = "Number of up-the-ramp reads in the exposure (almanac `nread`)."
+
+[columns.flagged_bad]
+description = "Almanac bad-exposure flag: 1 if the exposure is on the almanac's list of known bad exposures, or is an object exposure with no plate/config id. 0 on every row of this release."
+
+[columns.chip_flags]
+description = "Bitmask of which raw chip files exist for the exposure (almanac): bit 0 = chip a, bit 1 = chip b, bit 2 = chip c. `7` means all three chips are present."
+
+[columns.seeing]
+units = "arcsec"
+description = "Seeing recorded in the exposure header (almanac)."
+null = "NaN or 0 where not recorded."
+
+[columns.focus]
+description = "Telescope focus value recorded in the exposure header (almanac), in the header's native units."
+
+[columns.collpist]
+description = "Spectrograph collimator piston recorded in the exposure header (almanac), in the header's native units."
+null = "0 where not recorded (most exposures)."
+
+[columns.colpitch]
+description = "Spectrograph collimator pitch recorded in the exposure header (almanac), in the header's native units."
+null = "0 where not recorded (most exposures)."
+
+[columns.dithered_pixels]
+units = "pixel"
+description = "Commanded detector dither position for the exposure (almanac `dithpix`). Only a handful of values occur, at most two per night, so the value itself labels the dither position. `allVisitRV` uses it to keep only visits balanced between the two positions."
+null = "0 where the commanded position was not recorded."
+
+[columns.mjd_mid_exposure]
+units = "d (MJD, UTC)"
+description = "Mid-exposure time, frame-averaged, taken from the AR.jl 1D product (`mjd_mid_exposure_precise`). This is the epoch at which `v_barycentric_correction` is evaluated. LCO MJD 57800 exposures 1–8 carry an implausible time (a bad DATE-OBS in the raw headers) and are marked by `bary_flag` bit 1."
+
+[columns.join_status]
+description = "Outcome of the row-for-row join of the workup rows onto the almanac. Every row of this release has status 1."
+values = [
+  { value = 1, meaning = "ok" },
+  { value = 2, meaning = "no almanac exposure row" },
+  { value = 3, meaning = "no almanac fiber table" },
+  { value = 4, meaning = "fiber table has the wrong length" },
+  { value = 5, meaning = "fiber index out of range" },
+]
+
+# ---------------------------------------------------------------- velocities
+
+[columns.RV_pixoff_final]
+units = "pixel"
+description = "Best-fit Doppler shift of the stellar-line component, in pixels of the log-uniform grid (1 pixel = 6e-6 in log10 λ ≈ 4.14 km/s), in the observed (topocentric) frame. Copied from `arMADGICS_out_RV_pixoff_final.h5`. `v_rel` is this shift converted relativistically: `z = 10^(6e-6 RV_pixoff_final) - 1`."
+null = "NaN where the spectrum was not fit (`RV_flag` = 64)."
+
+[columns.RV_pix_var]
+units = "pixel²"
+description = "Variance of `RV_pixoff_final` from the curvature of the χ² surface at the minimum. Copied from `arMADGICS_out_RV_pix_var.h5`. Statistical only; see `e_v_rad`."
+null = "NaN where the curvature stencil falls off the grid (`RV_flag` bit 3) or the spectrum was not fit; non-positive where the curvature is bad (`RV_flag` bit 5)."
+
+[columns.v_rel]
+units = "km/s"
+description = "Observed (topocentric) radial velocity: `RV_pixoff_final` converted with the relativistic Doppler formula, no barycentric correction. Use this frame for sky and telluric work; use `v_rad` for stellar velocities."
+null = "NaN where `RV_pixoff_final` is not finite."
+
+[columns.v_barycentric_correction]
+units = "km/s"
+description = "Barycentric correction toward (`ra`, `dec`) at `mjd_mid_exposure`, from astropy `SkyCoord.radial_velocity_correction(kind='barycentric')` with `EarthLocation.of_site('apo' | 'lco')`."
+null = "NaN where there is no position or time (`bary_flag` bit 0)."
+
+[columns.v_rad]
+units = "km/s"
+description = "Barycentric radial velocity. Composed in redshift, `(1 + z_tot) = (1 + z)(1 + z_corr)` with `z` from `RV_pixoff_final` and `z_corr = v_barycentric_correction / c`, following the almanac `finalize_radial_velocities()` convention."
+null = "NaN where `v_rel` or `v_barycentric_correction` is not finite."
+
+[columns.e_v_rad]
+units = "km/s"
+description = "Statistical uncertainty of `v_rad`, propagated from `RV_pix_var`. It does not include the systematic floor that dominates at high S/N; for bright stars, repeat-visit scatter is the better precision estimate."
+null = "NaN where `RV_pix_var` is not finite."
+
+[columns.v_rad_offset_applied]
+units = "km/s"
+description = "Per-(telescope, fiber, era) velocity zero point subtracted from `v_rad` to give `v_rad_corr`, from the `offset_kms` column of `fiber_offsets.csv`, matched on (`tele`, `adjfiberindx - 300*(tele-1)`, `era`). Ranges from -0.354 to +0.275 km/s."
+null = "NaN wherever `v_rad_corr_flag` is non-zero."
+
+[columns.v_rad_corr]
+units = "km/s"
+description = "Barycentric radial velocity with the per-fiber zero point removed: `v_rad_corr = v_rad - v_rad_offset_applied`. One set of offsets covers both telescopes and both eras, so the APO/LCO difference (about 250 m/s) and the plate-to-FPS step are absorbed here too; do not apply a separate telescope or era correction. Only differences between fibers are measured; the offsets average to zero. No time dependence is modeled. Use this column to compare stars across fibers, telescopes or eras."
+null = "NaN wherever `v_rad_corr_flag` is non-zero."
+
+[columns.v_rad_corr_flag]
+description = "Why `v_rad_corr` is or is not defined on this row. `v_rad` is unaffected in every case."
+values = [
+  { value = 0, meaning = "corrected" },
+  { value = 1, meaning = "fiber not calibratable, no offset exists: LCO fibers 121, 240, 270 and 182 (FIBERID 180, 61, 31, 119); `calibratable = false` in `fiber_offsets.csv`" },
+  { value = 2, meaning = "row fails the default mask (`qa_bitmask`, `ingestBit`, `RV_flag`, `bary_flag` all 0 and finite `v_rad`), so no correction was attempted" },
+]
+
+# ---------------------------------------------------------------- quality
+
+[columns.snr]
+description = "Median per-pixel signal-to-noise, `median(flux .* sqrt(ivar))` over the pixels that enter the fit (`simplemsk`). Copied from `arMADGICS_out_snr.h5`. Can be negative for sky and blank fibers."
+null = "NaN where the spectrum could not be read or has no good pixels."
+
+[columns.RV_flag]
+description = "Radial-velocity fit flag, copied from `arMADGICS_out_RV_flag.h5`. 0 is a clean fit; exclude all non-zero values. Values seen in this release: 0, 1, 8, 10 (= 2 + 8), 32, 64."
+bits = [
+  { bit = 0, meaning = "quadratic interpolation of the χ² minimum gave a value above the best grid point; the grid point is reported instead" },
+  { bit = 1, meaning = "minimum at the edge of a search-grid level (the reported shift is a grid bound, not a measurement)" },
+  { bit = 3, meaning = "the curvature stencil (±4 steps) around the minimum falls off the final grid level; no variance (`RV_pix_var` NaN)" },
+  { bit = 5, meaning = "non-positive χ² curvature at the minimum; the variance is unusable" },
+  { bit = 6, meaning = "spectrum never entered the velocity scan because `ingestBit` carries a fatal bit; every fitted quantity is NaN" },
+]
+
+[columns.ingestBit]
+description = "Per-spectrum ingest and failure bitmask from arMADGICS.jl, copied from `arMADGICS_out_ingestBit.h5`. Bits 0, 1, 2 and 6 are fatal: the spectrum was skipped and `RV_flag` = 64. The others are informational, but the default mask excludes every non-zero value."
+bits = [
+  { bit = 0, meaning = "runtime error caught during the fit (spectrum skipped)" },
+  { bit = 1, meaning = "flux entirely NaN or zero (skipped)" },
+  { bit = 2, meaning = "fewer than 500 good pixels after all masks (skipped)" },
+  { bit = 3, meaning = "non-finite flux inside the AR.jl good-pixel mask (those pixels masked)" },
+  { bit = 4, meaning = "non-finite or non-positive ivar inside the good-pixel mask (those pixels masked)" },
+  { bit = 5, meaning = "tiny-ivar pixels (below 1e-6 × median good ivar) masked" },
+  { bit = 6, meaning = "`starscale0` = median flux non-finite or ≤ 0 (skipped)" },
+  { bit = 7, meaning = "AR.jl flagged this fiber's relative throughput unusable on this exposure (dead or near-dead fiber; flux left unscaled)" },
+  { bit = 8, meaning = "AR.jl throughput flag absent from the 1D file: fiber throughput unknown" },
+  { bit = 9, meaning = "no same-night dome flat for fluxing (`NOFILE`): relative throughput forced to 1; whole-exposure condition" },
+  { bit = 10, meaning = "fluxing dome flat is from the same cart but across a cart change (not contiguous with the exposure)" },
+]
+
+[columns.bary_flag]
+description = "Barycentric-correction quality bitmask. 0 means the correction is trustworthy; the default mask requires 0."
+bits = [
+  { bit = 0, name = "NO_BARY", meaning = "no barycentric correction available (no position or no time)" },
+  { bit = 1, name = "BAD_TIME", meaning = "mid-exposure time implausible for the night (LCO MJD 57800 exposures 1–8); the correction was evaluated at the wrong epoch and can be wrong by up to ±30 km/s" },
+  { bit = 2, name = "ID_MISMATCH", meaning = "almanac and workup `sdss_id` disagree, so the position is uncertain; error bounded by the plate radius, about 0.8 km/s" },
+  { bit = 3, name = "NO_RV", meaning = "`RV_pixoff_final` not finite, so no velocity" },
+]
+
+[columns.qa_bitmask]
+description = "Release exclusion lists applied per row (the machine-readable form of `bad_nights.csv`, `bad_fibers.csv` and `rv_railed.csv`). `fiber` in those files is `adjfiberindx - 300*(tele-1)`. The default mask requires 0."
+bits = [
+  { bit = 0, name = "BAD_NIGHT", meaning = "(tele, mjd) is in `bad_nights.csv`" },
+  { bit = 1, name = "CHRONIC_FIBER", meaning = "(tele, fiber) has a `scope = chronic` row in `bad_fibers.csv`" },
+  { bit = 2, name = "BAD_FIBER_NIGHT", meaning = "(tele, mjd, fiber) has a `scope = fiber_night` row in `bad_fibers.csv`" },
+  { bit = 3, name = "BAD_FIBER_RANGE", meaning = "(tele, fiber) has a `scope = fiber_mjd_range` row in `bad_fibers.csv` with `mjd_start <= mjd <= mjd_end`" },
+  { bit = 4, name = "RV_RAILED", meaning = "(tele, mjd, expnum, adjfiberindx) is in `rv_railed.csv`: the velocity sits at the search-grid bound" },
+]
+
+[columns.offtarget]
+description = "FPS off-target flag. 1 where the almanac fiber table has `assigned == 1` and `on_target == 0` for this row's (telescope, MJD, config_id, fiber): the robot was assigned the target but did not reach it, so the spectrum is of whatever sky the fiber did reach while the row still carries the assigned target's `sdss_id`, `ra` and `dec`. Most such spectra are near-blank sky, but some are field stars with clean, precise and wrong velocities that no other flag catches. The default mask requires 0. The rows are also listed in `offtarget_exposures.csv`."
+null = "0 for every plate-era row: the plate era has no assigned/on_target information, so 0 there means not testable rather than verified on target."

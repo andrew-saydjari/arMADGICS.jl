@@ -1,0 +1,147 @@
+# Curated column registry: allVisitRV_pass1_dr21.h5
+# Columns with no `description` here fall back to the dataset's own `description` attribute.
+
+[product]
+title = "Visit-level radial velocities"
+summary = "One row per star per visit: mean barycentric velocity over a dither-balanced set of exposures, with scatter and S/N."
+general_description = """
+A visit-level radial-velocity table built from `allExposure_pass1_dr21.h5` by averaging each star's exposures within a visit. A visit is one star's exposures inside one almanac object sequence (an uninterrupted run of science exposures on one pointing). Member exposures must pass the release default mask (`qa_bitmask`, `ingestBit`, `RV_flag`, `bary_flag` all 0 and finite `v_rad`), and only visits whose surviving exposures split evenly between exactly two dither positions are kept, so the dither-dependent velocity term cancels in the plain mean. Rows with `sdss_id <= 0` (sky and unassigned fibers) are not included.
+
+Velocities are barycentric, in km/s. Rows are sorted by (`tele`, `mjd`, `sdss_id`, `mjd_mid`); (`sdss_id`, `tele`, `mjd`, `mjd_mid`) is unique, (`sdss_id`, `tele`, `mjd`) is not (a star can have more than one visit per night). See `allVisitRV_README.md` for the visit definition, the counts at each step, and which scatter column to use.
+"""
+naming_convention = "`allVisitRV_pass1_dr21.h5`: one file for the whole release."
+row_definition = "one row per (star, visit)"
+written_by = ["allVisitRV builder (object-sequence map, dither balance, jackknife scatter, corrected-velocity columns)"]
+read_by = ["user analysis"]
+notes = """
+Datasets are chunked at 65,536 rows with the shuffle filter and gzip level 9. h5py reads `tele` as `|S3` (`b"apo"`).
+
+`ra`, `dec`, `glon`, `glat`, `fiber`, `era`, `field_id`, `plate_id`, `config_id`, `category` and `offtarget` are the same for every exposure in a visit, so they are carried across rather than averaged.
+
+`e_v_rad_visit` is a naive propagation and understates the true error for bright stars. `v_rad_scatter_jack` (where finite) and `v_rad_scatter` are the empirical alternatives; `v_rad_scatter_jack` is NaN for the 70.5% of visits with `n_exp == 2`.
+"""
+column_order = [
+  "sdss_id", "tele", "mjd", "mjd_mid", "n_exp",
+  "v_rad_mean", "v_rad_scatter", "v_rad_scatter_jack", "e_v_rad_visit",
+  "v_rad_corr_mean", "v_rad_corr_scatter", "v_rad_corr_scatter_jack",
+  "snr_mean", "snr_visit",
+  "ra", "dec", "glon", "glat", "fiber", "era", "field_id", "plate_id", "config_id", "category", "offtarget",
+]
+examples = """
+Julia:
+
+```
+using HDF5
+f = h5open("data/work/mwm/0.4.0/public/allVisitRV_pass1_dr21.h5", "r")
+v, sjack, s = read(f["v_rad_mean"]), read(f["v_rad_scatter_jack"]), read(f["v_rad_scatter"])
+scatter = ifelse.(isfinite.(sjack), sjack, s)     # preferred scatter per visit
+```
+
+Python:
+
+```
+import h5py, numpy as np
+with h5py.File("data/work/mwm/0.4.0/public/allVisitRV_pass1_dr21.h5", "r") as f:
+    v = f["v_rad_mean"][:]; tele = f["tele"][:].astype(str)
+```
+"""
+
+[product.attr_notes]
+provenance = "Build note left by the writer of the three `v_rad_corr_*` columns."
+
+[columns.sdss_id]
+description = "SDSS-V target identifier (`sdss_id` from `allExposure_pass1_dr21.h5`, not `sdss_id_workup`). Always > 0."
+
+[columns.tele]
+description = "Telescope, as a 3-character string: `apo` or `lco`."
+
+[columns.mjd]
+units = "d"
+description = "SDSS observing-night MJD of the visit (integer)."
+
+[columns.mjd_mid]
+units = "d (MJD, UTC)"
+description = "Mean of the member exposures' `mjd_mid_exposure`: the epoch `v_rad_mean` refers to. `mjd_mid - mjd` runs from about -0.19 to +0.69 d."
+
+[columns.n_exp]
+description = "Number of member exposures in the visit. Always even, at least 2, at most 44."
+
+[columns.v_rad_mean]
+units = "km/s"
+description = "Unweighted mean of the member `v_rad`, barycentric. The plain mean is deliberate: in a dither-balanced visit equal weights cancel the dither-dependent velocity term exactly."
+
+[columns.v_rad_scatter]
+units = "km/s"
+description = "Sample standard deviation (n-1) of the member `v_rad`. Defined for every row; for `n_exp == 2` it is `|Δv|/√2`. Biased low at small `n_exp` (about 20% at n = 2, 11% at n = 4 for Gaussian noise). Use `v_rad_scatter_jack` where it is finite."
+
+[columns.v_rad_scatter_jack]
+units = "km/s"
+description = "Jackknifed (bias-corrected) scatter of the member `v_rad`, Saydjari et al. 2025, AJ 169, 167, Eq. 8: `sigma_jack = N s(x) - (N-1) mean_i s(x without x_i)`. The preferred scatter wherever it is finite."
+null = "NaN when `n_exp == 2` (undefined: leave-one-out subsamples are single points)."
+
+[columns.e_v_rad_visit]
+units = "km/s"
+description = "Mean member `e_v_rad` divided by `√n_exp`. Naive propagation that inherits the missing high-S/N systematic floor, so it understates the true error for bright stars. Use as a relative weight or rough cut."
+
+[columns.v_rad_corr_mean]
+units = "km/s"
+description = "Unweighted mean of the member `v_rad_corr` (per-fiber zero point removed, from `fiber_offsets.csv`). Same members and same plain-mean convention as `v_rad_mean`. No further telescope or era correction is needed."
+null = "NaN if any member is on one of the four non-calibratable LCO fibers (36,872 rows)."
+
+[columns.v_rad_corr_scatter]
+units = "km/s"
+description = "Sample standard deviation (n-1) of the member `v_rad_corr`. Nearly identical to `v_rad_scatter`: a visit lives on one fiber, so a constant offset cancels within it."
+null = "NaN wherever `v_rad_corr_mean` is NaN."
+
+[columns.v_rad_corr_scatter_jack]
+units = "km/s"
+description = "Jackknifed scatter of the member `v_rad_corr`, same definition as `v_rad_scatter_jack`."
+null = "NaN when `n_exp == 2` or `v_rad_corr_mean` is NaN."
+
+[columns.snr_mean]
+description = "Mean of the member exposures' `snr`."
+
+[columns.snr_visit]
+description = "Quadrature sum of the member exposures' `snr`: the depth an equivalent visit coadd would have."
+
+[columns.ra]
+units = "deg"
+description = "Right ascension (ICRS), constant within a visit (taken from the first member)."
+
+[columns.dec]
+units = "deg"
+description = "Declination (ICRS), constant within a visit."
+
+[columns.glon]
+units = "deg"
+description = "Galactic longitude, constant within a visit."
+
+[columns.glat]
+units = "deg"
+description = "Galactic latitude, constant within a visit."
+
+[columns.fiber]
+description = "Per-telescope product fiber index, `adjfiberindx - 300*(tele-1)`, 1–300 (APOGEE FIBERID = 301 - fiber). Constant within a visit."
+
+[columns.era]
+description = "Survey era."
+values = [ { value = 1, meaning = "plate era" }, { value = 2, meaning = "FPS era" } ]
+
+[columns.field_id]
+description = "Almanac field id."
+null = "-1 where absent."
+
+[columns.plate_id]
+description = "Almanac plate id."
+null = "-1 in the FPS era (66,908 FPS-era rows are plate-plugged configurations and carry both ids)."
+
+[columns.config_id]
+description = "Almanac FPS configuration id."
+null = "-1 in the plate era."
+
+[columns.category]
+description = "Target category code; the code list is the `categories` attribute of the dataset (code = position in the list, starting at 0). Only 1 (`science`) and 2 (`standard_apogee`) occur."
+
+[columns.offtarget]
+description = "FPS off-target flag, constant within a visit: 1 where the robot was assigned this target but did not reach it (almanac `assigned == 1 & on_target == 0`), so the spectra are of whatever the fiber reached while carrying the assigned target's identity. These visits passed the default exposure mask, which does not include `offtarget`; cut on `offtarget == 0` for stellar work."
+null = "0 for every plate-era visit (not testable rather than verified on target)."
