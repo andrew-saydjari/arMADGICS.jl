@@ -8,6 +8,20 @@ on:
   workflow_dispatch:
   pull_request:
 jobs:
+  shell_tests:
+    # Syntax-checks the workup launchers and runs the lmod/nounset regression test.
+    # GitHub runners have no lmod, so test_module_setup.sh prints SKIP and exits 0 there;
+    # it only exercises the module stack on a Flatiron node.
+    name: Shell scripts (bash -n + module-setup test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for f in workup/run_workup.sh scripts/lib_lmod.sh scripts/lib_julia_warm.sh \
+                   workup/mpi_env/setup_mpi_env.sh workup/test/test_module_setup.sh; do
+            bash -n "$f"
+          done
+      - run: bash workup/test/test_module_setup.sh
   test_lite:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
