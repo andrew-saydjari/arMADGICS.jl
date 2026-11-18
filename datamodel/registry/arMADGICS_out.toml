@@ -1,0 +1,293 @@
+# Curated column registry: arMADGICS_out_<key>.h5 (arMADGICS.jl workup outputs)
+# One file per key; each file holds one dataset named <key> plus a scalar `hdr` dataset
+# whose attributes carry git provenance. Semantics follow pipeline.jl (RVextract save
+# list) and src/pipelineCore.jl (component construction) on the run branch.
+
+[product]
+title = "arMADGICS.jl per-exposure spectral components and velocity-fit outputs"
+summary = "40 per-key files, row-aligned with allExposure: spectra, masks, MADGICS component separation (star continuum, star lines, sky), the velocity χ² surfaces and per-spectrum flags."
+general_description = """
+arMADGICS.jl separates each APOGEE spectrum into additive components using data-driven Gaussian priors (MADGICS: Marginalized Analytic Dataspace Gaussian Inference for Component Separation): sky continuum, sky emission lines, a stellar continuum (which carries the telluric absorption, multiplied into its prior basis), stellar absorption lines Doppler-shifted on a grid of trial velocities, and a residual. The stellar-line shift that minimizes χ² gives the velocity.
+
+The workup writes one HDF5 file per output key, `arMADGICS_out_<key>.h5`, each with a dataset named `<key>` holding that quantity for every spectrum of the run, and a scalar `hdr` dataset whose attributes record the pipeline provenance. Row `i` of every file is row `i` of `allExposure_pass1_dr21.h5`, which supplies the identifiers (`tele`, `mjd`, `expnum`, `adjfiberindx`, `sdss_id`, ...). The 0.4.0 release directory currently holds 7 of the 40 keys (column "In 0.4.0 release dir"); this page documents all 40.
+
+Spectral arrays have 8700 pixels on the log-uniform vacuum wavelength grid `wave_j = 10^(4.17825 + 6e-6 (j-1))` Å, `j = 1..8700`, in the observed (topocentric) frame. The grid is not stored in the files.
+
+Components and the reduced spectrum are related by `apVisit_v0 = (flux - x_skyLines_faint_v0 - x_skyContinuum_v0) ./ x_starContinuum_v0` on good pixels, and approximately `flux ≈ x_skyContinuum_v0 + x_skyLines_faint_v0 + x_starContinuum_v0 .* (1 + star lines) + x_residuals_v0` (`avg_flux_conservation` checks this).
+"""
+naming_convention = "`arMADGICS_out_<key>.h5`, where `<key>` is the dataset name inside the file (for example `arMADGICS_out_flux.h5` holds `flux`)."
+row_definition = "one row per (telescope, MJD, exposure, fiber), identical order to `allExposure_pass1_dr21.h5`"
+written_by = ["arMADGICS.jl `pipeline.jl` (per-fiber batches) and the workup step `workup_serial.jl` (stacks the batches into one file per key)"]
+read_by = ["allExposure builder (`RV_pixoff_final`, `RV_pix_var`, `RV_flag`, `ingestBit`, `snr`)", "user analysis of spectra and components"]
+attrs_description = "Root attributes written by the workup step (identical in every file). `workup_rawdir` is an internal location and is shown as `[internal path]`."
+columns_description = "Each row of this table is one file. Type and shape are of the dataset `<key>` inside `arMADGICS_out_<key>.h5`; spectral arrays are `(8700, N)` in Julia, `(N, 8700)` in h5py."
+column_order = [
+  "adjfiberindx",
+  "flux", "fluxivar", "simplemsk", "finalmsk", "apVisit_v0",
+  "x_starContinuum_v0", "x_starLines_v0", "x_starLines_err_v0", "x_starLines_restFrame_v0", "x_starLineCof_v0",
+  "x_skyContinuum_v0", "x_skyLines_faint_v0", "x_residuals_v0", "x_residuals_z_v0",
+  "RV_pixoff_final", "RV_pixoff_disc_final", "RV_pix_var", "RV_minchi2_final", "RV_flag",
+  "RV_p5delchi2_lvl1", "RV_p5delchi2_lvl2", "RV_p5delchi2_lvl3",
+  "RVchi2_residuals", "tot_p5chi2_v0", "avg_flux_conservation",
+  "snr", "data_pix_cnt", "final_pix_cnt", "flux_nans", "fluxerr2_nans",
+  "starscale", "starscale1", "skyscale0", "skyscale1", "nSkyFibers",
+  "relthrpt", "bitmsk_relthrpt", "ingestBit", "skyBit",
+]
+examples = """
+Julia, one spectrum and its components (row `i`, 1-based):
+
+```
+using HDF5
+base = "data/work/mwm/0.4.0/"
+rd(key) = h5open(f -> f[key][:, i], base * "arMADGICS_out_$(key).h5")
+wave = 10 .^ (4.17825 .+ 6e-6 .* (0:8699))
+flux, apvisit, starlines = rd("flux"), rd("apVisit_v0"), rd("x_starLines_v0")
+good = isfinite.(flux)
+```
+
+Python (h5py), 0-based row `i`:
+
+```
+import h5py, numpy as np
+base = "data/work/mwm/0.4.0/"
+wave = 10 ** (4.17825 + 6e-6 * np.arange(8700))
+with h5py.File(base + "arMADGICS_out_apVisit_v0.h5") as f:
+    apvisit = f["apVisit_v0"][i, :]
+```
+
+Reading a whole spectral key loads 8700 × 26.7M float64 values (about 1.9 TB); read rows or row blocks.
+"""
+
+[product.attr_notes]
+workup_fibers = "Range of `adjfiberindx` included in the workup."
+workup_generated = "Time the workup file was written."
+workup_nsamp = "Number of rows (N)."
+workup_rawdir = "Location of the per-fiber batch files that were stacked."
+workup_row_offset = "Row offset of this file within the full run (0: the file holds the whole run)."
+workup_writer = "Script that wrote the file."
+"hdr.pipeline" = "Pipeline that produced the outputs."
+"hdr.git_branch" = "Git branch of arMADGICS.jl used for the run."
+"hdr.git_commit" = "Git commit of arMADGICS.jl used for the run."
+"hdr.git_clean" = "Whether the working tree had no uncommitted changes at run time."
+
+# ---------------------------------------------------------------- identity
+
+[columns.adjfiberindx]
+description = "Fiber index of the row, 1–600 (301–600 are LCO). Same as `allExposure_pass1_dr21.adjfiberindx`; kept as a row-alignment check."
+
+# ---------------------------------------------------------------- data and masks
+
+[columns.flux]
+units = "instrumental flux"
+description = "The input spectrum: AR.jl `ar1Dunical` flux of this fiber on the 8700-pixel grid, after relative fluxing by AR.jl. No sky subtraction. Not absolutely flux calibrated."
+null = "NaN on pixels outside `simplemsk`, and everywhere for spectra that could not be read."
+
+[columns.fluxivar]
+units = "1 / flux²"
+description = "Inverse variance of `flux`, from AR.jl."
+null = "NaN on pixels outside `simplemsk`."
+
+[columns.simplemsk]
+description = "Pixel mask of the pixels that enter the fit: the AR.jl good-pixel mask (after the ingest checks remove non-finite flux, bad ivar and tiny-ivar pixels) AND the prior pixel mask (on-detector pixels where the priors are defined) AND the exposure's local sky-line mask. 1 = used. Stored as int64."
+
+[columns.finalmsk]
+description = "Pixel mask used for the final component solve. 1 = good pixel; `flux` is NaN where it is 0. Identical to `simplemsk` in this run. All 0 for spectra that were not fit. Stored as int64."
+
+[columns.apVisit_v0]
+units = "dimensionless"
+description = "Continuum-normalized spectrum in the observed frame: `apVisit_v0 = (flux - x_skyLines_faint_v0 - x_skyContinuum_v0) ./ x_starContinuum_v0`. Because telluric absorption lives in `x_starContinuum_v0`, this division also removes the tellurics."
+null = "NaN outside `finalmsk` and where the stellar continuum is non-finite or below 1e-3 × `starscale1` in absolute value (broken or very faint fibers)."
+
+# ---------------------------------------------------------------- components
+
+[columns.x_starContinuum_v0]
+units = "instrumental flux"
+description = "Stellar continuum component, including the telluric absorption (the telluric spectrum is multiplied into the stellar-continuum prior basis; there is no separate telluric component)."
+null = "NaN outside the on-detector prior pixel mask (chip gaps and grid edges)."
+
+[columns.x_starLines_v0]
+units = "dimensionless (fraction of continuum)"
+description = "Stellar absorption-line component in the observed frame, at the best-fit shift, built with the reference-LSF basis (the basis is circularly shifted to the fitted velocity). Continuum-normalized: the flux-space line component is approximately `x_starContinuum_v0 .* x_starLines_v0`."
+null = "Not masked: defined on all 8700 pixels for fitted spectra; NaN for spectra that were not fit."
+
+[columns.x_starLines_err_v0]
+units = "dimensionless (fraction of continuum)"
+description = "Per-pixel posterior standard deviation of `x_starLines_v0` (square root of the diagonal of the posterior covariance of the stellar-line component)."
+null = "NaN for spectra that were not fit."
+
+[columns.x_starLines_restFrame_v0]
+units = "dimensionless (fraction of continuum)"
+description = "Stellar-line component evaluated at zero shift with the reference LSF: the reference-LSF basis template at zero offset times `x_starLineCof_v0`. Use it to stack or compare line profiles without the per-exposure Doppler shift."
+null = "NaN for spectra that were not fit."
+
+[columns.x_starLineCof_v0]
+units = "dimensionless"
+description = "The 50 coefficients of the stellar-line basis at the best-fit shift. `x_starLines_restFrame_v0` is the zero-shift reference-LSF basis times these coefficients."
+null = "NaN for spectra that were not fit."
+
+[columns.x_skyContinuum_v0]
+units = "instrumental flux"
+description = "Sky continuum component: the fitted local sky-continuum term plus the exposure's mean sky continuum from its sky fibers."
+null = "NaN outside the on-detector prior pixel mask."
+
+[columns.x_skyLines_faint_v0]
+units = "instrumental flux"
+description = "Sky emission-line component: the fitted sky-line term plus the exposure's mean sky-line spectrum from its sky fibers."
+null = "NaN outside `finalmsk` and outside the sky-line region of the prior."
+
+[columns.x_residuals_v0]
+units = "instrumental flux"
+description = "Residual component: the part of the data not assigned to any modeled component."
+null = "NaN outside `finalmsk`."
+
+[columns.x_residuals_z_v0]
+units = "dimensionless (σ)"
+description = "`x_residuals_v0 .* sqrt.(fluxivar)`: residuals in units of the per-pixel noise."
+null = "NaN outside `finalmsk`."
+
+# ---------------------------------------------------------------- velocity fit
+
+[columns.RV_pixoff_final]
+units = "pixel"
+description = "Best-fit shift of the stellar-line component in pixels of the log-uniform grid, observed (topocentric) frame: the quadratically interpolated minimum of the χ² scan over the three grid levels. One pixel is 6e-6 in log10 λ, about 4.14 km/s. `allExposure.v_rel` is the relativistic conversion of this shift, `z = 10^(6e-6 RV_pixoff_final) - 1`."
+null = "NaN for spectra that were not fit (`RV_flag` = 64)."
+
+[columns.RV_pixoff_disc_final]
+units = "pixel"
+description = "Grid point at the smallest sampled χ² (before quadratic interpolation)."
+null = "NaN for spectra that were not fit."
+
+[columns.RV_pix_var]
+units = "pixel²"
+description = "Variance of `RV_pixoff_final` from the χ² curvature at the minimum of the final grid level, using a ±4-step stencil. Statistical only."
+null = "NaN when the stencil falls off the grid (`RV_flag` bit 3) or for spectra that were not fit; non-positive when the curvature is bad (`RV_flag` bit 5)."
+
+[columns.RV_minchi2_final]
+units = "½Δχ²"
+description = "Interpolated minimum of the scanned quantity: the change in ½χ² from adding the shifted stellar-line component to the model (sky lines + sky continuum + stellar continuum). More negative is a better fit."
+null = "NaN for spectra that were not fit."
+
+[columns.RV_flag]
+description = "Velocity-fit flag. 0 is a clean fit. Values seen: 0, 1, 8, 10 (= 2 + 8), 32, 64."
+bits = [
+  { bit = 0, meaning = "quadratic interpolation of the minimum gave a value above the best grid point; the grid point is reported" },
+  { bit = 1, meaning = "minimum at the edge of a search-grid level (the shift is a grid bound)" },
+  { bit = 3, meaning = "curvature stencil falls off the final grid level; `RV_pix_var` is NaN" },
+  { bit = 5, meaning = "non-positive χ² curvature at the minimum" },
+  { bit = 6, meaning = "not fit: `ingestBit` carries a fatal bit, every fitted quantity is NaN" },
+]
+
+[columns.RV_p5delchi2_lvl1]
+units = "½Δχ²"
+description = "The scanned ½Δχ² surface on grid level 1: 281 shifts from -70 to +70 pixels in steps of 0.5 (about ±290 km/s)."
+null = "NaN for spectra that were not fit."
+
+[columns.RV_p5delchi2_lvl2]
+units = "½Δχ²"
+description = "The ½Δχ² surface on grid level 2: 81 shifts from -8 to +8 pixels in steps of 0.2, relative to the level-1 best shift rounded to 0.1 pixel (the center is not stored; recompute it from level 1)."
+null = "NaN for spectra that were not fit."
+
+[columns.RV_p5delchi2_lvl3]
+units = "½Δχ²"
+description = "The ½Δχ² surface on grid level 3: 61 shifts from -3 to +3 pixels in steps of 0.1, relative to the best shift found by levels 1–2 rounded to 0.1 pixel."
+null = "NaN for spectra that were not fit."
+
+[columns.RVchi2_residuals]
+units = "χ²"
+description = "χ² of the final residuals, `sum(x_residuals_v0.^2 .* fluxivar)` over `finalmsk`."
+null = "NaN for spectra that were not fit."
+
+[columns.tot_p5chi2_v0]
+units = "χ²"
+description = "Total `Xd' C⁻¹ Xd` of the data minus the mean sky under the full final model covariance C (noise plus all component priors)."
+null = "NaN for spectra that were not fit."
+
+[columns.avg_flux_conservation]
+units = "dimensionless"
+description = "Interquartile range over pixels of `(flux - model) ./ flux`, where model is the sum of the residual, sky-line, sky-continuum and (multiplicatively line-modulated) stellar-continuum components. Zero up to round-off by construction; it is kept as a tripwire, and a non-zero value means the component bookkeeping broke."
+null = "NaN for spectra that were not fit."
+
+# ---------------------------------------------------------------- per-spectrum scalars
+
+[columns.snr]
+description = "Median per-pixel S/N, `median(flux .* sqrt(fluxivar))` over `simplemsk`. Can be negative for sky and blank fibers."
+null = "NaN where there are no good pixels."
+
+[columns.data_pix_cnt]
+units = "pixels"
+description = "Number of pixels in `simplemsk`."
+
+[columns.final_pix_cnt]
+units = "pixels"
+description = "Number of pixels in `finalmsk`. Equal to `data_pix_cnt` in this run; 0 for spectra that were not fit."
+
+[columns.flux_nans]
+description = "Number of NaN `flux` values inside `simplemsk`. 0 for every spectrum that passed ingest."
+
+[columns.fluxerr2_nans]
+description = "Number of NaN `fluxivar` values inside `simplemsk`. 0 for every spectrum that passed ingest."
+
+[columns.starscale]
+units = "instrumental flux"
+description = "Median of the input flux before fitting (`starscale0`); scales the stellar-continuum prior for the first pass. Non-positive or non-finite values set `ingestBit` bit 6."
+
+[columns.starscale1]
+units = "instrumental flux"
+description = "Median of the fitted stellar continuum; scales the stellar-continuum prior for the final solve and sets the floor used for `apVisit_v0`."
+null = "NaN for spectra that were not fit."
+
+[columns.skyscale0]
+units = "instrumental flux"
+description = "Median of the exposure's mean sky-continuum model built from its sky fibers (before fitting this spectrum)."
+
+[columns.skyscale1]
+units = "instrumental flux"
+description = "Median of the fitted `x_skyContinuum_v0`."
+null = "NaN for spectra that were not fit."
+
+[columns.nSkyFibers]
+description = "Number of sky fibers on the exposure that passed the sky-fiber checks and were used to build the exposure's sky model."
+
+[columns.relthrpt]
+units = "dimensionless"
+description = "AR.jl relative throughput of this fiber on this exposure, measured from a dome flat (1 = typical)."
+null = "NaN where the 1D file could not be read; exactly 1 where AR.jl had no fluxing file (`bitmsk_relthrpt` bit 2)."
+
+[columns.bitmsk_relthrpt]
+description = "AR.jl per-fiber, per-exposure relative-throughput bitmask, read from the `ar1Dunical` file. Bits 1, 3 and 4 mean the fiber is unusable and AR.jl left its flux unscaled; mask chi² analyses on them."
+null = "-1 where the field was absent from the reduction (throughput unknown, not good)."
+bits = [
+  { bit = 0, name = "RELTHRPT_WARN_BIT", meaning = "throughput low (below 1 - sig_cut × IQR) but usable and flux-scaled" },
+  { bit = 1, name = "RELTHRPT_BROKEN_BIT", meaning = "throughput below 0.07: dead or near-dead fiber" },
+  { bit = 2, name = "RELTHRPT_NOFILE_BIT", meaning = "no fluxing file; `relthrpt` forced to exactly 1" },
+  { bit = 3, name = "RELTHRPT_NOTFINITE_BIT", meaning = "`relthrpt` NaN/Inf (always with bit 1)" },
+  { bit = 4, name = "RELTHRPT_LOWGOODPIX_BIT", meaning = "too few good pixels to measure throughput (sets bits 3, 1 and 0 too)" },
+]
+
+[columns.ingestBit]
+description = "Per-spectrum ingest and failure bitmask. Bits 0, 1, 2 and 6 are fatal (spectrum skipped, `RV_flag` = 64); the rest are informational."
+bits = [
+  { bit = 0, meaning = "runtime error caught during the fit (skipped)" },
+  { bit = 1, meaning = "flux entirely NaN or zero (skipped)" },
+  { bit = 2, meaning = "fewer than 500 good pixels after all masks (skipped)" },
+  { bit = 3, meaning = "non-finite flux inside the good-pixel mask (pixels masked)" },
+  { bit = 4, meaning = "non-finite or non-positive ivar inside the good-pixel mask (pixels masked)" },
+  { bit = 5, meaning = "tiny-ivar pixels masked (below 1e-6 × median good ivar)" },
+  { bit = 6, meaning = "`starscale` non-finite or ≤ 0 (skipped)" },
+  { bit = 7, meaning = "AR.jl flagged the fiber's throughput unusable (`bitmsk_relthrpt` bits 1/3/4)" },
+  { bit = 8, meaning = "AR.jl throughput flag absent: throughput unknown" },
+  { bit = 9, meaning = "no same-night dome flat for fluxing (`bitmsk_relthrpt` bit 2); whole exposure" },
+  { bit = 10, meaning = "fluxing dome flat is same-cart but across a cart change" },
+]
+
+[columns.skyBit]
+description = "Exposure-level status of the sky model used for this spectrum. 0 means all sky fibers were usable."
+bits = [
+  { bit = 0, meaning = "at least one candidate sky fiber excluded by the sky-fiber checks (non-finite flux, all NaN/zero, too few good pixels, or AR.jl throughput unusable)" },
+  { bit = 1, meaning = "at least one sky fiber excluded by the sky-level z-cut" },
+  { bit = 2, meaning = "fewer than 3 sky fibers survived: the sky-line component was skipped (set to zero)" },
+  { bit = 3, meaning = "no sky fibers in the configuration: the sky-line component was skipped" },
+  { bit = 4, meaning = "at least one used sky fiber has a non-positive median (recorded only)" },
+  { bit = 5, meaning = "at least one sky fiber gave a non-finite continuum decomposition and was dropped" },
+  { bit = 6, meaning = "at least one candidate sky fiber excluded by the AR.jl throughput flag" },
+]

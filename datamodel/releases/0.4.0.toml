@@ -1,0 +1,104 @@
+# Release config for the APOGEE DR21 pass-1 0.4.0 release.
+# `source` / `source_dir` are where the generator READS the files (cluster paths, read-only);
+# `public_path` is what readers see, relative to `public_prefix`.
+
+release = "0.4.0"
+title = "APOGEE DR21 pass-1 (0.4.0)"
+public_prefix = "data/work/mwm/0.4.0"
+description = """
+Data model for the APOGEE DR21 pass-1 release 0.4.0: per-exposure, per-fiber spectral components and radial velocities from arMADGICS.jl run on ApogeeReduction.jl (AR.jl) 1D spectra, a per-exposure summary table joined to the almanac observing metadata, a visit-level radial-velocity table, and the exclusion and calibration tables that go with them. Each page below documents one file (or one family of files): what it contains, how it is named, and every column with its type, shape, units and meaning.
+"""
+
+conventions = """
+- **Row alignment.** Row `i` of `allExposure_pass1_dr21.h5` is row `i` of every `arMADGICS_out_<key>.h5` file: one row per (telescope, MJD, exposure, fiber). Rows are not sorted by star.
+- **Telescope.** `tele` is `1` = APO, `2` = LCO in the HDF5 exposure products; the CSVs and `allVisitRV` use the strings `apo` / `lco`.
+- **Fiber indices.** `adjfiberindx` runs 1–600: 1–300 are APO fibers, 301–600 are LCO fibers. The per-telescope product fiber index is `fiber = adjfiberindx - 300*(tele-1)` (1–300); this is the `fiber` used by the CSVs and `allVisitRV`. The almanac / APOGEE FIBERID runs the other way: `fiber_index_almanac = FIBERID = 301 - fiber`.
+- **Era.** `era` is `1` = plate era, `2` = FPS (robotic fiber positioner) era.
+- **Wavelength grid.** Every spectral array has 8700 pixels on a log-uniform vacuum wavelength grid, `wave_j = 10^(4.17825 + 6e-6 (j-1))` Å for `j = 1..8700` (about 15,075–17,000 Å). Spectra are in the observed (topocentric) frame; one pixel is a velocity step of `c ln(10) 6e-6` ≈ 4.14 km/s.
+- **Velocity frames.** `v_rel` is the observed (topocentric) velocity, with no barycentric correction. `v_rad` is barycentric. `v_rad_corr = v_rad - v_rad_offset_applied` additionally removes the per-fiber zero point from `fiber_offsets.csv`. All velocities are in km/s.
+- **Missing values.** Floating-point columns use NaN for "not available". Integer identifier columns copied from the almanac use `-1` where the identifier does not exist (for example `plate_id` in the FPS era, `config_id` in the plate era).
+- **Array order.** Shapes are given in Julia (column-major) order, with the row axis written `N`; h5py and other row-major readers see the reverse order. A spectrum is `f["flux"][:, i]` in Julia and `f["flux"][i, :]` in h5py.
+"""
+
+# cluster prefix -> public prefix, applied to any text taken from file attributes
+[path_map]
+"/mnt/ceph/users/sdssv/work/scifest/0.4.0" = "data/work/mwm/0.4.0"
+
+[[products]]
+name = "allExposure_pass1_dr21"
+kind = "hdf5_table"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/allExposure_pass1_dr21.h5"
+public_path = "public/allExposure_pass1_dr21.h5"
+registry = "allExposure_pass1_dr21.toml"
+harvest = ["/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/RECOMMENDED_CUTS.md"]
+
+[[products]]
+name = "allVisitRV_pass1_dr21"
+kind = "hdf5_table"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/allVisitRV_pass1_dr21.h5"
+public_path = "public/allVisitRV_pass1_dr21.h5"
+registry = "allVisitRV_pass1_dr21.toml"
+harvest = ["/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/allVisitRV_README.md"]
+
+[[products]]
+name = "arMADGICS_out"
+kind = "hdf5_perkey"
+# the full set of 40 workup keys; the release dir currently holds a subset
+source_dir = "/mnt/ceph/users/sdssv/work/asaydjari/pass1_dr21/arMADGICS/workup_57618_61230"
+pattern = '^arMADGICS_out_(.+)\.h5$'
+release_dir = "/mnt/ceph/users/sdssv/work/scifest/0.4.0"
+public_path = "arMADGICS_out_<key>.h5"
+registry = "arMADGICS_out.toml"
+
+[[products]]
+name = "bad_nights"
+kind = "csv"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/bad_nights.csv"
+public_path = "public/bad_nights.csv"
+registry = "bad_nights.toml"
+
+[[products]]
+name = "bad_fibers"
+kind = "csv"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/bad_fibers.csv"
+public_path = "public/bad_fibers.csv"
+registry = "bad_fibers.toml"
+
+[[products]]
+name = "rv_railed"
+kind = "csv"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/rv_railed.csv"
+public_path = "public/rv_railed.csv"
+registry = "rv_railed.toml"
+
+[[products]]
+name = "fiber_offsets"
+kind = "csv"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/fiber_offsets.csv"
+public_path = "public/fiber_offsets.csv"
+registry = "fiber_offsets.toml"
+harvest = ["/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/FIBER_OFFSETS_TABLE.md"]
+
+[[products]]
+name = "offtarget_exposures"
+kind = "csv"
+source = "/mnt/ceph/users/sdssv/work/scifest/0.4.0/public/offtarget_exposures.csv"
+public_path = "public/offtarget_exposures.csv"
+registry = "offtarget_exposures.toml"
+
+[[products]]
+name = "ar1D_pixel_bitmask"
+kind = "reference"
+registry = "ar1D_pixel_bitmask.toml"
+
+[[documents]]
+public_path = "public/RECOMMENDED_CUTS.md"
+summary = "The default quality mask for the release, with per-cut row counts and the meaning of each flag value that occurs."
+
+[[documents]]
+public_path = "public/allVisitRV_README.md"
+summary = "How visits are defined, which scatter column to use, and the corrected-velocity columns of `allVisitRV_pass1_dr21.h5`."
+
+[[documents]]
+public_path = "public/FIBER_OFFSETS_TABLE.md"
+summary = "How the per-fiber velocity zero points in `fiber_offsets.csv` were derived and how to apply them."

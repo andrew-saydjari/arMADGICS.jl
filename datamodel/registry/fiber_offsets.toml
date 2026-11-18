@@ -1,0 +1,71 @@
+# Curated column registry: public/fiber_offsets.csv
+# FIBER_OFFSETS_TABLE.md is harvested as a fallback; entries here take precedence.
+
+[product]
+title = "Per-fiber radial-velocity zero points"
+summary = "One velocity zero point per (telescope, fiber, era); `v_rad_corr = v_rad - offset_kms`."
+general_description = """
+Each APOGEE fiber has its own radial-velocity zero point. This table gives it for every (telescope, fiber, era), in km/s; `allExposure_pass1_dr21.h5` applies it as `v_rad_corr = v_rad - offset_kms`, matched on (`tele`, `fiber`, `era`).
+
+The offsets are an empirical calibration. Stars observed on more than one fiber, telescope or era tie the fibers together, and a joint least-squares fit solves for the star velocities and the fiber zero points at once (method of Saydjari et al. 2025, AJ 169, 167, Section 4), using science targets that pass the default mask at S/N ≥ 15 with binaries and variables held out. Because the telescopes and eras share one fit, the APO/LCO difference (about 250 m/s) and the plate-to-FPS step (+25 m/s at APO, -61 m/s at LCO) are absorbed into these numbers; do not apply a separate telescope or era correction. Only differences between fibers are measured: the offsets average to zero. One constant per fiber per era; no time dependence.
+
+Four LCO fibers are not calibratable (121, 240, 270 and 182; FIBERID 180, 61, 31, 119). Thirteen further fibers have no data because they are excluded survey-wide by `qa_bitmask`. See `FIBER_OFFSETS_TABLE.md`.
+"""
+naming_convention = "`fiber_offsets.csv`"
+row_definition = "one row per (telescope, fiber, era): 2 × 300 × 2 = 1200"
+written_by = ["fiber zero-point fit (`s10_final_build.jl`)"]
+read_by = ["fiber-offset application (`s4_apply.jl`): `allExposure.v_rad_corr`, `allVisitRV.v_rad_corr_*`"]
+column_order = ["tele", "fiber", "era", "offset_kms", "err_kms", "calibratable", "reason", "n_stars_used", "n_stars_any", "n_exp", "offset_meas_kms", "err_meas_kms", "err_curv_kms"]
+
+[columns.tele]
+description = "Telescope: `apo` or `lco`."
+
+[columns.fiber]
+description = "Product fiber index 1–300 (`adjfiberindx - 300*(tele-1)`; APOGEE FIBERID = 301 - fiber)."
+
+[columns.era]
+description = "Survey era."
+values = [ { value = 1, meaning = "plate era" }, { value = 2, meaning = "FPS era" } ]
+
+[columns.offset_kms]
+units = "km/s"
+description = "The zero point. Subtract it from `v_rad`."
+null = "NaN where `calibratable` is false."
+
+[columns.err_kms]
+units = "km/s"
+description = "1σ uncertainty of `offset_kms` from a bootstrap over stars (median 5.0 m/s). The one to use."
+null = "NaN where `calibratable` is false."
+
+[columns.calibratable]
+description = "True if enough stars link the fiber to other fibers and its zero point is measured to better than 15 m/s. False means `offset_kms` and `err_kms` are NaN and the fiber must not be corrected."
+
+[columns.reason]
+description = "Why the fiber is not calibratable."
+null = "Empty when `calibratable` is true."
+values = [
+  { value = "NO_DATA_AFTER_MASK", meaning = "no exposures survive the default mask (fiber excluded survey-wide by `qa_bitmask`)" },
+  { value = "TOO_FEW_LINKING_STARS", meaning = "too few stars link this fiber to others" },
+  { value = "ERR_TOO_LARGE", meaning = "uncertainty above 15 m/s" },
+]
+
+[columns.n_stars_used]
+description = "Stars linking this fiber to at least one other: the stars that determined the offset."
+
+[columns.n_stars_any]
+description = "Stars with any exposure on this fiber."
+
+[columns.n_exp]
+description = "Exposures on this fiber that entered the fit."
+
+[columns.offset_meas_kms]
+units = "km/s"
+description = "Value the fit returned even where it is not trustworthy, kept so the `calibratable` decision can be audited. Do not apply."
+
+[columns.err_meas_kms]
+units = "km/s"
+description = "Bootstrap uncertainty of `offset_meas_kms`, kept for auditing. Do not apply."
+
+[columns.err_curv_kms]
+units = "km/s"
+description = "Formal least-squares uncertainty. It assumes independent exposures and runs about 2.7× smaller than `err_kms`; use `err_kms`."

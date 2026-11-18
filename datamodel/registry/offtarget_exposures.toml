@@ -1,0 +1,30 @@
+# Curated column registry: public/offtarget_exposures.csv
+
+[product]
+title = "FPS off-target exposures"
+summary = "317,322 FPS-era exposure × fiber rows whose robot did not reach its assigned target; the same rows as `offtarget == 1`."
+general_description = """
+Exposure × fiber rows in the FPS era where the almanac fiber table has `assigned == 1` and `on_target == 0`: the robotic positioner was assigned a target but did not reach it, so the spectrum is of whatever sky the fiber reached, not of `sdss_id`. These are exactly the rows with `offtarget == 1` in `allExposure_pass1_dr21.h5`. FPS era only (MJD ≥ 59558); the plate era has no assigned/on_target information and is not flagged.
+"""
+naming_convention = "`offtarget_exposures.csv`; the first lines start with `#` and describe the file."
+row_definition = "one row per exposure × fiber"
+written_by = ["off-target sidecar builder (almanac FPS fiber-table scan)"]
+read_by = ["allExposure `offtarget`", "allVisitRV `offtarget`"]
+attrs_description = "Comment lines at the top of the file."
+column_order = ["tele", "mjd", "expnum", "adjfiberindx", "sdss_id"]
+
+[columns.tele]
+description = "Telescope: `apo` or `lco`."
+
+[columns.mjd]
+units = "d"
+description = "SDSS observing-night MJD."
+
+[columns.expnum]
+description = "Exposure number within the night."
+
+[columns.adjfiberindx]
+description = "Fiber index 1–600 (301–600 are LCO), as in `allExposure_pass1_dr21.h5`."
+
+[columns.sdss_id]
+description = "Identifier of the target the fiber was assigned to (and did not reach)."

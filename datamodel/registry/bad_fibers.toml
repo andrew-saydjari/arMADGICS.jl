@@ -1,0 +1,60 @@
+# Curated column registry: public/bad_fibers.csv
+
+[product]
+title = "Fiber-level exclusion list"
+summary = "3,167 fiber exclusions in three scopes (chronic, single night, MJD range); source of `qa_bitmask` bits 1–3."
+general_description = """
+Fibers whose spectra should be excluded, at three scopes. `chronic` rows exclude a fiber at every MJD (`qa_bitmask` bit 1, `CHRONIC_FIBER`): 11 fibers with chronically bad wavelength solutions plus APO fibers 201 and 202 with pathologically high χ². `fiber_night` rows exclude one fiber on one night (bit 2, `BAD_FIBER_NIGHT`), where that fiber's wavelength solution failed while the rest of the night was fine. `fiber_mjd_range` rows exclude a fiber over an MJD range (bit 3, `BAD_FIBER_RANGE`): APO chip-B fibers 151–165 over MJD 57969–58015, whose traces were mis-extracted.
+
+`fiber` here is the product fiber index, `adjfiberindx - 300*(tele-1)`, not the almanac FIBERID.
+"""
+naming_convention = "`bad_fibers.csv`"
+row_definition = "one row per exclusion"
+written_by = ["public exclusion-list builder (`build_public_lists.jl`), from the wavelength-calibration census and the anomaly search"]
+read_by = ["allExposure `qa_bitmask` (`s10_add_galactic_qa.py`)", "fiber zero-point fit (excluded fibers get no offset)"]
+column_order = ["tele", "fiber", "scope", "mjd", "mjd_start", "mjd_end", "class", "reason", "source"]
+
+[columns.tele]
+description = "Telescope: `apo` or `lco`."
+
+[columns.fiber]
+description = "Product fiber index, 1–300 (`adjfiberindx - 300*(tele-1)`; APOGEE FIBERID = 301 - fiber)."
+
+[columns.scope]
+description = "Which rows of the exposure table the exclusion covers."
+values = [
+  { value = "chronic", meaning = "every MJD (`qa_bitmask` bit 1)" },
+  { value = "fiber_night", meaning = "the single night `mjd` (`qa_bitmask` bit 2)" },
+  { value = "fiber_mjd_range", meaning = "`mjd_start <= mjd <= mjd_end` (`qa_bitmask` bit 3)" },
+]
+
+[columns.mjd]
+units = "d"
+description = "Night of a `fiber_night` exclusion."
+null = "Empty for `chronic` and `fiber_mjd_range` rows."
+
+[columns.mjd_start]
+units = "d"
+description = "First MJD (inclusive) of a `fiber_mjd_range` exclusion."
+null = "Empty for other scopes."
+
+[columns.mjd_end]
+units = "d"
+description = "Last MJD (inclusive) of a `fiber_mjd_range` exclusion."
+null = "Empty for other scopes."
+
+[columns.class]
+description = "Failure class."
+values = [
+  { value = "WAVECAL_CHRONIC", meaning = "wavelength solution chronically unreliable (dead or damaged fiber)" },
+  { value = "CHI2_PATHOLOGY", meaning = "pathologically high χ²/dof across the survey (APO 201, 202); cause not yet resolved" },
+  { value = "FPI_MODE_SLIP", meaning = "single-fiber FPI mode slip on that night" },
+  { value = "SKY_FIBER_OFFSET", meaning = "sky-line offset above 1 Å on that night" },
+  { value = "TRACE_BLOCK", meaning = "trace mis-extraction over a contiguous block of fibers and nights" },
+]
+
+[columns.reason]
+description = "Free-text evidence for the exclusion."
+
+[columns.source]
+description = "Internal provenance: the analysis table or section the row came from. Not a file in the release."

@@ -1,0 +1,668 @@
+# Schema snapshot written by datamodel/generate.jl. Do not edit by hand;
+# it is the reference the next release is diffed against.
+generated = "2026-10-06T14:34:08.247Z"
+release = "0.4.0"
+
+[products.allExposure_pass1_dr21]
+kind = "hdf5_table"
+n_rows = 26715540
+
+    [products.allExposure_pass1_dr21.columns.RV_flag]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.RV_pix_var]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.RV_pixoff_final]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.adjfiberindx]
+    dtype = "int16"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.bary_flag]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.cart_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.catalogid]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.category]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.chip_flags]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.collpist]
+    dtype = "float32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.colpitch]
+    dtype = "float32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.config_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.dec]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.design_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.dithered_pixels]
+    dtype = "float32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.e_v_rad]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.era]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.expnum]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.fiber_index_almanac]
+    dtype = "int16"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.field_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.flagged_bad]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.focus]
+    dtype = "float32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.fps]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.glat]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.glon]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.hole_type]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.image_type]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.ingestBit]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.join_status]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.lambda_eff]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.map_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.mjd]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.mjd_mid_exposure]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.n_read]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.offtarget]
+    dtype = "int8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.plate_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.qa_bitmask]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.ra]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.sdss_id]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.sdss_id_agrees]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.sdss_id_workup]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.seeing]
+    dtype = "float32"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.snr]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.tele]
+    dtype = "int8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_barycentric_correction]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_rad]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_rad_corr]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_rad_corr_flag]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_rad_offset_applied]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.v_rel]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.x_focal]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allExposure_pass1_dr21.columns.y_focal]
+    dtype = "float64"
+    shape = "(N,)"
+
+[products.allVisitRV_pass1_dr21]
+kind = "hdf5_table"
+n_rows = 6670336
+
+    [products.allVisitRV_pass1_dr21.columns.category]
+    dtype = "uint8"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.config_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.dec]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.e_v_rad_visit]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.era]
+    dtype = "int8"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.fiber]
+    dtype = "int16"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.field_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.glat]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.glon]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.mjd]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.mjd_mid]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.n_exp]
+    dtype = "int16"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.offtarget]
+    dtype = "int8"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.plate_id]
+    dtype = "int32"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.ra]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.sdss_id]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.snr_mean]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.snr_visit]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.tele]
+    dtype = "S3"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_corr_mean]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_corr_scatter]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_corr_scatter_jack]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_mean]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_scatter]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.allVisitRV_pass1_dr21.columns.v_rad_scatter_jack]
+    dtype = "float64"
+    shape = "(N,)"
+
+[products.arMADGICS_out]
+kind = "hdf5_perkey"
+n_rows = 26715540
+
+    [products.arMADGICS_out.columns.RV_flag]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.RV_minchi2_final]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.RV_p5delchi2_lvl1]
+    dtype = "float64"
+    shape = "(281, N)"
+
+    [products.arMADGICS_out.columns.RV_p5delchi2_lvl2]
+    dtype = "float64"
+    shape = "(81, N)"
+
+    [products.arMADGICS_out.columns.RV_p5delchi2_lvl3]
+    dtype = "float64"
+    shape = "(61, N)"
+
+    [products.arMADGICS_out.columns.RV_pix_var]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.RV_pixoff_disc_final]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.RV_pixoff_final]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.RVchi2_residuals]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.adjfiberindx]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.apVisit_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.avg_flux_conservation]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.bitmsk_relthrpt]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.data_pix_cnt]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.final_pix_cnt]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.finalmsk]
+    dtype = "int64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.flux]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.flux_nans]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.fluxerr2_nans]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.fluxivar]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.ingestBit]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.nSkyFibers]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.relthrpt]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.simplemsk]
+    dtype = "int64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.skyBit]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.skyscale0]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.skyscale1]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.snr]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.starscale]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.starscale1]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.tot_p5chi2_v0]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.arMADGICS_out.columns.x_residuals_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_residuals_z_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_skyContinuum_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_skyLines_faint_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_starContinuum_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_starLineCof_v0]
+    dtype = "float64"
+    shape = "(50, N)"
+
+    [products.arMADGICS_out.columns.x_starLines_err_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_starLines_restFrame_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+    [products.arMADGICS_out.columns.x_starLines_v0]
+    dtype = "float64"
+    shape = "(8700, N)"
+
+[products.bad_fibers]
+kind = "csv"
+n_rows = 3167
+
+    [products.bad_fibers.columns.class]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.fiber]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.mjd]
+    dtype = "int64?"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.mjd_end]
+    dtype = "int64?"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.mjd_start]
+    dtype = "int64?"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.reason]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.scope]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.source]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_fibers.columns.tele]
+    dtype = "string"
+    shape = "(N,)"
+
+[products.bad_nights]
+kind = "csv"
+n_rows = 141
+
+    [products.bad_nights.columns.class]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_nights.columns.mjd]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.bad_nights.columns.reason]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_nights.columns.source]
+    dtype = "string"
+    shape = "(N,)"
+
+    [products.bad_nights.columns.tele]
+    dtype = "string"
+    shape = "(N,)"
+
+[products.fiber_offsets]
+kind = "csv"
+n_rows = 1200
+
+    [products.fiber_offsets.columns.calibratable]
+    dtype = "bool"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.era]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.err_curv_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.err_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.err_meas_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.fiber]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.n_exp]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.n_stars_any]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.n_stars_used]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.offset_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.offset_meas_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.reason]
+    dtype = "string?"
+    shape = "(N,)"
+
+    [products.fiber_offsets.columns.tele]
+    dtype = "string"
+    shape = "(N,)"
+
+[products.offtarget_exposures]
+kind = "csv"
+n_rows = 317322
+
+    [products.offtarget_exposures.columns.adjfiberindx]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.offtarget_exposures.columns.expnum]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.offtarget_exposures.columns.mjd]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.offtarget_exposures.columns.sdss_id]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.offtarget_exposures.columns.tele]
+    dtype = "string"
+    shape = "(N,)"
+
+[products.rv_railed]
+kind = "csv"
+n_rows = 393
+
+    [products.rv_railed.columns.RV_flag]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.RV_kms]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.adjfiberindx]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.expnum]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.mjd]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.pixoff]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.sdss_id]
+    dtype = "int64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.snr]
+    dtype = "float64"
+    shape = "(N,)"
+
+    [products.rv_railed.columns.tele]
+    dtype = "string"
+    shape = "(N,)"

@@ -1,0 +1,43 @@
+# Curated column registry: public/rv_railed.csv
+
+[product]
+title = "Velocities at the search-grid bound"
+summary = "393 spectra whose fitted shift sits at the edge of the velocity search grid; source of `qa_bitmask` bit 4 (`RV_RAILED`)."
+general_description = """
+Spectra whose fitted Doppler shift sits at the bound of the search grid (|`RV_pixoff_final`| near 80 pixels, about 330 km/s): the reported velocity is the grid bound, not a measurement. These rows have `RV_flag == 0`, so no pipeline flag marks them; `qa_bitmask` bit 4 does.
+"""
+naming_convention = "`rv_railed.csv`"
+row_definition = "one row per exposure × fiber"
+written_by = ["public exclusion-list builder (`build_public_lists.jl`)"]
+read_by = ["allExposure `qa_bitmask` (`s10_add_galactic_qa.py`)"]
+column_order = ["tele", "mjd", "expnum", "adjfiberindx", "sdss_id", "snr", "pixoff", "RV_kms", "RV_flag"]
+
+[columns.tele]
+description = "Telescope: `apo` or `lco`."
+
+[columns.mjd]
+units = "d"
+description = "SDSS observing-night MJD."
+
+[columns.expnum]
+description = "Exposure number within the night."
+
+[columns.adjfiberindx]
+description = "Fiber index 1–600 (301–600 are LCO), as in `allExposure_pass1_dr21.h5`."
+
+[columns.sdss_id]
+description = "SDSS-V target identifier of the row."
+
+[columns.snr]
+description = "Median per-pixel S/N of the spectrum (`allExposure.snr`)."
+
+[columns.pixoff]
+units = "pixel"
+description = "Fitted shift, `RV_pixoff_final`, at the grid bound."
+
+[columns.RV_kms]
+units = "km/s"
+description = "`pixoff` converted to a topocentric velocity (relativistic, no barycentric correction), as `v_rel`."
+
+[columns.RV_flag]
+description = "`RV_flag` of the row; 0 for every row, which is why this list exists."

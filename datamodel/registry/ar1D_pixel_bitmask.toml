@@ -1,0 +1,51 @@
+# Reference page (no file in the release): ApogeeReduction.jl pixel and fiber bitmasks.
+# Source of truth: ApogeeReduction.jl src/utils.jl (pixel bits) and README.md / src/ar1D.jl (relthrpt bits).
+
+[product]
+title = "ApogeeReduction.jl per-pixel and per-fiber bitmasks"
+summary = "Bit tables of the AR.jl `ar1Dcal` / `ar1Dunical` per-chip pixel mask and per-fiber throughput mask that feed arMADGICS.jl."
+general_description = """
+The AR.jl 1D products (`ar1Dcal_*` per chip, `ar1Dunical_*` resampled onto the 8700-pixel grid) carry a per-pixel bitmask and a per-fiber relative-throughput bitmask. These files are inputs to arMADGICS.jl and are not in the 0.4.0 release directory; this page documents the bit tables so that the flags propagated into the release (`bitmsk_relthrpt`, `ingestBit` bits 7–10, and the good-pixel mask behind `simplemsk`) can be read.
+
+A pixel is treated as bad by AR.jl when any bit in `bad_pix_bits` is set: bits 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12 and 14. Bits 0, 3 and 13 are informational. arMADGICS.jl starts from the AR.jl good-pixel mask, so pixels with bad bits are excluded from `simplemsk` and are NaN in `arMADGICS_out_flux.h5`.
+"""
+file_type = "reference (bit tables; the AR.jl files are not in this release)"
+written_by = ["ApogeeReduction.jl (`src/utils.jl` pixel bits; `src/ar1D.jl` throughput bits)"]
+read_by = ["arMADGICS.jl ingest (`src/ingest.jl`)"]
+column_order = ["pixel_mask", "bitmsk_relthrpt"]
+
+[columns.pixel_mask]
+dtype = "integer bitmask"
+shape = "per pixel, per fiber, per chip"
+description = "Per-pixel quality bitmask accumulated through the 2D and 1D reduction. 0 = no problem."
+bits = [
+  { bit = 0, meaning = "reference array pixels" },
+  { bit = 1, meaning = "reference pixels" },
+  { bit = 2, meaning = "bad reference pixels" },
+  { bit = 3, meaning = "pixels not dark corrected" },
+  { bit = 4, meaning = "pixels with negative dark current" },
+  { bit = 5, meaning = "pixels with large dark current" },
+  { bit = 6, meaning = "flat response too low" },
+  { bit = 7, meaning = "one up-the-ramp difference dropped as a likely cosmic ray" },
+  { bit = 8, meaning = "more than one difference dropped as likely cosmic rays (suspicious)" },
+  { bit = 9, meaning = "bad linear up-the-ramp χ²" },
+  { bit = 10, meaning = "failed 1D extraction" },
+  { bit = 11, meaning = "no nearby good pixels in 1D extraction" },
+  { bit = 12, meaning = "neff > 10 in 1D extraction" },
+  { bit = 13, meaning = "pixel partially saturated" },
+  { bit = 14, meaning = "pixel fully saturated" },
+]
+bits_note = "`bad_pix_bits` = bits 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14."
+
+[columns.bitmsk_relthrpt]
+dtype = "integer bitmask"
+shape = "per fiber, per exposure (per chip in ar1Duni)"
+description = "Per-fiber relative-throughput bitmask from a dome flat. Propagated into the release as `arMADGICS_out_bitmsk_relthrpt.h5`. Fibers with bits 1, 3 or 4 (`RELTHRPT_UNUSABLE_BITS`) are not flux-scaled by AR.jl."
+null = "-1 in arMADGICS outputs where the field was absent from the reduction."
+bits = [
+  { bit = 0, name = "RELTHRPT_WARN_BIT", meaning = "low throughput (below 1 - sig_cut × IQR) but usable and flux-scaled" },
+  { bit = 1, name = "RELTHRPT_BROKEN_BIT", meaning = "throughput below 0.07: dead or near-dead fiber" },
+  { bit = 2, name = "RELTHRPT_NOFILE_BIT", meaning = "no fluxing file; `relthrpt` forced to exactly 1" },
+  { bit = 3, name = "RELTHRPT_NOTFINITE_BIT", meaning = "`relthrpt` NaN/Inf (always with bit 1)" },
+  { bit = 4, name = "RELTHRPT_LOWGOODPIX_BIT", meaning = "too few good pixels to measure throughput (sets bits 3, 1 and 0 too)" },
+]
