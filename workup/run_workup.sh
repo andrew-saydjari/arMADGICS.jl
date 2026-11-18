@@ -112,20 +112,29 @@ elif [ "$TIER" != "mpi" ]; then
 fi
 
 # ---- MPI tier (default) -----------------------------------------------------
-# make `module` available in non-interactive shells
+# >>> module-setup (extracted verbatim by workup/test/test_module_setup.sh; keep the markers)
+# The site lmod scripts and the `module` function read unset variables, so they must run
+# with nounset/errexit OFF (2026-11-17: LCO 61360 daily died here with
+# "/mnt/sw/lmod/setup.sh: line 12: ENABLE_LMOD: unbound variable"). lib_lmod.sh saves and
+# restores the shell options around them; see that file for the full story.
+source "$(dirname "$WORKUP_DIR")/scripts/lib_lmod.sh"
+
+# make `module` available in non-interactive shells (e.g. the systemd-launched dailies)
+lmod_relax_opts
 if ! type module &>/dev/null; then
     for f in /etc/profile.d/modules.sh /etc/profile.d/lmod.sh; do
         # shellcheck disable=SC1090
         [ -r "$f" ] && source "$f" && break
     done
 fi
+lmod_restore_opts
 if ! type module &>/dev/null; then
     echo "run_workup.sh: FATAL: no 'module' command available — cannot set up the MPI stack." >&2
     echo "  Fallback: rerun with WORKUP_TIER=serial (no modules required)." >&2
     exit 3
 fi
 
-if ! module load cephtweaks openmpi/5.0.6 hdf5/mpi-1.14.5 2>/tmp/run_workup_module_err.$$; then
+if ! lmod_module load cephtweaks openmpi/5.0.6 hdf5/mpi-1.14.5 2>/tmp/run_workup_module_err.$$; then
     echo "run_workup.sh: FATAL: 'module load cephtweaks openmpi/5.0.6 hdf5/mpi-1.14.5' failed:" >&2
     cat /tmp/run_workup_module_err.$$ >&2
     rm -f /tmp/run_workup_module_err.$$
@@ -139,6 +148,7 @@ if ! command -v mpiexec &>/dev/null; then
     echo "  Fallback: rerun with WORKUP_TIER=serial." >&2
     exit 3
 fi
+# <<< module-setup
 
 export CEPHTWEAKS_LAZYIO=${CEPHTWEAKS_LAZYIO:-1}
 export HDF5_USE_FILE_LOCKING=${HDF5_USE_FILE_LOCKING:-FALSE}

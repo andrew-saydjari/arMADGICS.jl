@@ -26,7 +26,12 @@ REPO=${REPO:-/mnt/home/asaydjari/gitcode/arMADGICS.jl}   # env-overridable; work
 SCRATCH=/mnt/ceph/users/sdssv/work/asaydjari/2026_09_02/w2_mpi_smoke/slurm_${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
 
+# lmod's `module` function reads unset variables: run it with nounset off (see
+# scripts/lib_lmod.sh). Inlined rather than sourced because Slurm runs a spooled
+# copy of this script, and $REPO may point at a checkout without lib_lmod.sh.
+set +u
 module load cephtweaks openmpi/5.0.6 hdf5/mpi-1.14.5
+set -u
 export CEPHTWEAKS_LAZYIO=1
 
 run_case () {
