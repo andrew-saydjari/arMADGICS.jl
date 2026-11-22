@@ -691,55 +691,130 @@ function getExposure(reduxBase, tele, mjd, expnum, adjfiberindx)
     return fspec, fivar, fmsk, metaexport
 end
 
+"""
+    get_telemjd_runlist_from_almanac(almanacFile, tele, mjd; accepted_fibtypes,
+        exposure_flag_policy = "drop")
+
+The per-(exposure, fiber) runlist for one night: `(tele, mjd, expnum,
+adjfiberindx, sdss_id)` named tuples. The default policy `"drop"` keeps the
+AKS 2026-09-08 guard for prior builds: no EXCLUDED exposure enters. See
+`get_telemjd_runlist_and_guard` for the policies and the exposure table.
+"""
 function get_telemjd_runlist_from_almanac(
         almanacFile, tele, mjd;
-        accepted_fibtypes::Vector{String} = ["sci", "tel"]
+        accepted_fibtypes::Vector{String} = ["sci", "tel"],
+        exposure_flag_policy::AbstractString = "drop"
     )
+    run_lst, _ = get_telemjd_runlist_and_guard(almanacFile, tele, mjd;
+        accepted_fibtypes = accepted_fibtypes, exposure_flag_policy = exposure_flag_policy)
+    return map(r -> (tele = r.tele, mjd = r.mjd, expnum = r.expnum,
+            adjfiberindx = r.adjfiberindx, sdss_id = r.sdss_id), run_lst)
+end
+
+"""
+    get_telemjd_runlist_and_guard(almanacFile, tele, mjd; accepted_fibtypes,
+        exposure_flag_policy = "drop") -> (run_lst, guard_rows)
+
+Runlist plus the exposure table for one night.
+
+Candidates are commanded objects with `n_read > 3` and `chip_flags == 7`. Each
+gets ONE verdict from `exposure_verdict` (AR `exposure_flags` bits 2^0/2^1,
+almanac `flagged_bad`, and the "never judged" cases). Then
+(`exposure_fit_action`):
+
+- `flagged_bad` exposures are never queued (AR does not reduce them to 1D);
+- EXCLUDED exposures are queued under `"flag"` and `"ignore"`, not under `"drop"`;
+- UNKNOWN exposures are always queued.
+
+Every runlist entry also carries `exposure_flags` (UInt8, 0 where the decoration
+has no row) and `exposure_state` (Int8, `EXPSTATE_*`). `guard_rows` has one named
+tuple per candidate exposure: the verdict, the action taken, the number of fibers
+queued, and the decoration's provenance, so the per-run exposure table says why
+every exposure was or was not used.
+"""
+function get_telemjd_runlist_and_guard(
+        almanacFile, tele, mjd;
+        accepted_fibtypes::Vector{String} = ["sci", "tel"],
+        exposure_flag_policy::AbstractString = "drop"
+    )
+    policy = check_exposure_flag_policy(exposure_flag_policy)
     teleind = (tele[1:3] == "lco") ? 2 : 1
     f = h5open(almanacFile)
     df_exp = read_almanac_exp_df(f, tele, mjd)
     msk_obj = (df_exp.image_type .== "object")
-    msk_obj .&= (df_exp.n_read .> 3) .& (df_exp.chip_flags .== 7) .& (df_exp.flagged_bad .== 0)
+    msk_obj .&= (df_exp.n_read .> 3) .& (df_exp.chip_flags .== 7)
 
-    # AKS 2026-09-08 guard: drop exposures the pipeline has flagged bad or
-    # engineering. Loud on purpose — the count and the reason are logged for
-    # every (tele, mjd) that loses anything.
-    expflags = read_exposure_science_flags(f, tele, mjd, df_exp.exposure)
-    msk_sci = (expflags .& EXPFLAG_NO_SCIENCE) .== 0x00
-    dropped = msk_obj .& .!msk_sci
-    if any(dropped)
-        r = exposure_science_exclusion_reasons(expflags[dropped])
-        @info "Exposure-level science guard EXCLUDED $(r.n_excluded) of " *
-              "$(count(msk_obj)) candidate object exposures for $(tele)/$(mjd): " *
-              "predicted_bad=$(r.n_predicted_bad) engineering=$(r.n_engineering) " *
-              "both=$(r.n_both). Excluded exposure numbers: " *
-              "$(collect(df_exp.exposure[dropped]))"
+    # ONE verdict per exposure (src/exposureGuard.jl::exposure_verdict). Loud on
+    # purpose: counts and exposure numbers are logged for every night with any
+    # EXCLUDED or UNKNOWN candidate.
+    v = exposure_verdicts_for_night(f, tele, mjd, df_exp.exposure, df_exp.image_type,
+        df_exp.flagged_bad)
+    action = [exposure_fit_action(v.state[i], v.reason[i], policy) for i in eachindex(df_exp.exposure)]
+    cand = findall(msk_obj)
+    excl = filter(i -> v.state[i] == EXPSTATE_EXCLUDED, cand)
+    unk = filter(i -> v.state[i] == EXPSTATE_UNKNOWN, cand)
+    if !isempty(excl)
+        @info "Exposure-level science guard [policy=$(policy)]: $(length(excl)) of " *
+              "$(length(cand)) candidate object exposures for $(tele)/$(mjd) are " *
+              "EXCLUDED: " *
+              join(["$(df_exp.exposure[i])=$(v.reason[i])->$(action[i])" for i in excl], ", ")
     end
-    msk_obj .&= msk_sci
+    if !isempty(unk)
+        @info "Exposure-level science guard: $(length(unk)) of $(length(cand)) candidate " *
+              "object exposures for $(tele)/$(mjd) are UNKNOWN (kept, exposure_state=2): " *
+              join(["$(k)=$(n)" for (k, n) in _exposure_guard_tally(v.reason[unk])], ", ") *
+              "; exposures " * join(string.(df_exp.exposure[unk[1:min(end, 20)]]), ",") *
+              (length(unk) > 20 ? ", ... (+$(length(unk) - 20) more)" : "")
+    end
+    queue = msk_obj .& (action .== "fit")
 
-    row_exp = df_exp[msk_obj, :].exposure
+    nqueued = zeros(Int, length(df_exp.exposure))
     run_lsts = []
-    for expnum in row_exp
+    for irow in findall(queue)
+        expnum = df_exp.exposure[irow]
         fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, expnum)
         fibtypelist = map(x -> fibtargDict[x], 1:300)
         fiber_sdss_id_list = map(x -> fiber_sdss_id_Dict[x], 1:300)
         msk_fiberok = map(x -> x[1:3] in accepted_fibtypes, fibtypelist)
         targfibIndxs = findall(msk_fiberok)
         adjtargfibIndxs = targfibIndxs .+ (teleind - 1) * 300
+        nqueued[irow] = length(targfibIndxs)
+        eflag, estate = v.flags[irow], v.state[irow]
 
         iterexp = Iterators.zip(
             Iterators.repeated(tele), Iterators.repeated(mjd),
             Iterators.repeated(expnum), adjtargfibIndxs, fiber_sdss_id_list[targfibIndxs]
         )
         iterexp_named = map(
-            ((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s),
+            ((t, m, e, f, s),) -> (tele=t, mjd=m, expnum=e, adjfiberindx=f, sdss_id=s,
+                exposure_flags=eflag, exposure_state=estate),
             iterexp
         )
         push!(run_lsts, collect(iterexp_named))
     end
     run_lst = vcat(run_lsts...)
     close(f)
-    return run_lst
+
+    p = v.decoration.prov
+    guard_rows = [(tele = String(tele), mjd = String(string(mjd)),
+                      exposure = Int(df_exp.exposure[i]),
+                      exposure_flags = v.flags[i], flags_present = v.present[i],
+                      flagged_bad = Int(df_exp.flagged_bad[i]),
+                      exposure_state = v.state[i], state_reason = v.reason[i],
+                      action = action[i], n_fibers_queued = nqueued[i],
+                      exposure_class_pred = p["exposure_class_pred"][i],
+                      exposure_class_prob = p["exposure_class_prob"][i],
+                      exposure_class_status = p["exposure_class_status"][i],
+                      exposure_class_p_sky = p["exposure_class_p_sky"][i],
+                      exposure_class_oh_rel = p["exposure_class_oh_rel"][i],
+                      exposure_class_line_z = p["exposure_class_line_z"][i],
+                      exposure_class_tr_dyn = p["exposure_class_tr_dyn"][i],
+                      exposure_class_object_rule = p["exposure_class_object_rule"][i],
+                      engineering_frac = p["engineering_frac"][i],
+                      engineering_carton = p["engineering_carton"][i],
+                      engineering_basis = p["engineering_basis"][i])
+                  for i in cand]
+    return run_lst, guard_rows
 end
 
 # DR17 sky continuum/line separation for one sky-fiber spectrum, against the target

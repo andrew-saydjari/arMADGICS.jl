@@ -40,6 +40,15 @@ function parse_commandline()
         help = "local cache directory"
         arg_type = String
         default = "../local_cache/"
+        "--exposure_flag_policy"
+        required = false
+        help = "what to do with exposures whose verdict is EXCLUDED (AR exposure_flags " *
+               "predicted_bad/engineering): flag (fit, keep with exposure_state=1), " *
+               "drop (do not fit; the pre-0.4.1 behavior) or ignore (fit, no exclusion). " *
+               "Almanac flagged_bad exposures are never fitted (AR does not reduce them). " *
+               "See src/exposureGuard.jl."
+        arg_type = String
+        default = "flag"
     end
     return parse_args(s)
 end
@@ -127,6 +136,7 @@ git_branch, git_commit, git_clean = initalize_git(proj_path);
 
     reduxBase = parg["redux_base"]
     almanacFile = parg["almanac_file"]
+    exposure_flag_policy = check_exposure_flag_policy(parg["exposure_flag_policy"])
 
     # Prior Dictionary (path construction + ARM_* env overrides live in src/priors.jl)
     prior_dict = build_prior_dict(prior_dir)
@@ -343,6 +353,12 @@ end
             for elelst in extractlst
                 extractor(out, elelst[1], elelst[2], savename)
             end
+            # Exposure-level verdict, one value per row, straight from the runlist
+            # (src/exposureGuard.jl). The workup turns these into
+            # arMADGICS_out_exposure_flags.h5 / arMADGICS_out_exposure_state.h5.
+            # Combined products must keep only exposure_state != 1.
+            h5write(savename, "exposure_flags", UInt8[r.exposure_flags for r in indsubset])
+            h5write(savename, "exposure_state", Int8[r.exposure_state for r in indsubset])
             
             hdr_dict = Dict(
                 "pipeline" => "arMADGICS.jl",
@@ -400,9 +416,18 @@ else
     end
 end
 close(f)
-@everywhere get_telemjd_runlist_from_almanac_partial(argtup) = get_telemjd_runlist_from_almanac(almanacFile, argtup[1], argtup[2])
-run_lsts = pmap(get_telemjd_runlist_from_almanac_partial, tele_mjd_pairs)
-run_lst = vcat(run_lsts...)
+println("Exposure flag policy: $(exposure_flag_policy) " *
+        "(flag = fit EXCLUDED exposures and label them; drop = do not fit them; " *
+        "ignore = no exclusion). Almanac: $(almanacFile)")
+flush(stdout)
+@everywhere get_telemjd_runlist_and_guard_partial(argtup) = get_telemjd_runlist_and_guard(
+    almanacFile, argtup[1], argtup[2]; exposure_flag_policy = exposure_flag_policy)
+runlist_and_guard = pmap(get_telemjd_runlist_and_guard_partial, tele_mjd_pairs)
+run_lst = vcat(first.(runlist_and_guard)...)
+guard_rows = vcat(last.(runlist_and_guard)...)
+write_exposure_guard_table(joinpath(out_dir, "exposure_guard.h5"), guard_rows;
+    policy = exposure_flag_policy, almanac_file = almanacFile)
+log_exposure_guard_summary(guard_rows, exposure_flag_policy)
 
 # this takes like 5 min to run (speed up)
 iterlst = []
