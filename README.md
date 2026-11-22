@@ -250,6 +250,51 @@ indistinguishable from unflagged data (median 49.1 vs 43.4) — it records that 
 sky screen did its job, not that the spectrum is suspect. All 300 `skyBit = 12`
 spectra are a single exposure (LCO MJD 57802, exposure 215).
 
+## Exposure-Level Science State (bulk runs, 0.4.1 onward)
+
+Every candidate object exposure gets one verdict from
+`src/exposureGuard.jl: exposure_verdict(flags, flagged_bad; object_unjudged)`.
+That function is the only place where the three exclusion sources are combined:
+
+| `exposure_state` | meaning | reasons (`state_reason`) |
+| --- | --- | --- |
+| `0` OK | judged, no exclusion source fired | `ok` |
+| `1` EXCLUDED | AR `exposure_flags` bit 0 (`predicted_bad`; for commanded objects, the 2D object-frame rule) or bit 1 (`engineering`) is set, or almanac `flagged_bad != 0` | the sources that fired, joined with `+`, e.g. `predicted_bad`, `engineering`, `almanac_flagged_bad+engineering` |
+| `2` UNKNOWN | never judged: AR bit 2 (`notrun`), no decoration row (`flags_absent`), or a commanded object that the object-frame rule never judged (`object_rule_absent`: the decoration predates the rule; `object_rule_no_evidence`: every rule input was NaN) | as listed |
+
+`pipeline.jl --exposure_flag_policy` (logged at startup and on every night with
+EXCLUDED or UNKNOWN exposures) decides what the runlist does:
+
+| policy | EXCLUDED exposures | UNKNOWN exposures |
+| --- | --- | --- |
+| `flag` (default) | fitted; every row carries `exposure_state = 1` | fitted, `exposure_state = 2` |
+| `drop` | not fitted (the behavior before 0.4.1) | fitted, `exposure_state = 2` |
+| `ignore` | fitted; no exclusion (for reproducing behavior before any exposure exclusion) | fitted, `exposure_state = 2` |
+
+Almanac `flagged_bad` exposures are never fitted under any policy, because
+ApogeeReduction does not reduce them to 1D.
+
+Outputs:
+
+- Per row: `exposure_flags` (UInt8, the AR byte as read from the almanac
+  decoration; 0 where the decoration has no row) and `exposure_state` (Int8). The
+  workup writes them as `arMADGICS_out_exposure_flags.h5` and
+  `arMADGICS_out_exposure_state.h5`, row-aligned with every other key.
+- Per run: `<outdir>/exposure_guard.h5` has one row per candidate object exposure,
+  fitted or not. Columns: the state, the reason, the action (`fit`,
+  `dropped_policy`, `dropped_flagged_bad`), the number of fibers queued, and the
+  decoration's provenance (`exposure_class_pred/prob/status/p_sky/oh_rel/line_z/tr_dyn/object_rule`,
+  `engineering_frac/carton/basis`). For an exposure that appears in no
+  per-row output, this table is the only record of why.
+
+**Combined products** (visit and star RVs and parameters, coadds, star-level
+counts) and the recommended cuts must keep only rows with `exposure_state != 1`
+(`exposure_usable_for_combined`). UNKNOWN passes that cut on purpose. Select
+`exposure_state == 0` to keep only exposures that were positively cleared.
+
+Prior builds are not affected: `get_telemjd_runlist_from_almanac` keeps the
+default policy `drop` and the guard below.
+
 ## Exposure-Level Science Guard (prior builds)
 
 AKS 2026-09-08: *"we want to be sure no prior builds after any first pass use
