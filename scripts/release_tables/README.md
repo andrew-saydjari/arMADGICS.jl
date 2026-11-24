@@ -94,6 +94,7 @@ had in 0.4.0).
 | bad_nights.csv, bad_fibers.csv, rv_railed.csv (step 2) | full files | byte-identical |
 | allExposure (Julia builder) | all 52 datasets x 26,715,540 rows, all attributes, layouts | identical except 3 columns in 1,387 rows of the last 7 nights; see below |
 | allExposure (legacy Python, run today) | its 48 datasets x all rows | same 1,387-row difference, and bit-identical to the Julia build on all 48 shared datasets |
+| allExposure, Julia cold vs warm cache | all 52 datasets | identical; the Julia time harvest equals the legacy exposure_times.h5 value for value |
 | exposure_times.h5 (legacy step 2) | full file | byte-identical |
 | seqmap.jls (step 4) | full file | byte-identical |
 | allVisitRV (steps 5-7, 12, 16) | all 25 datasets x 6,670,336 rows, attributes, layouts | identical |

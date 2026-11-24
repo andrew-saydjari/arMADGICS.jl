@@ -78,7 +78,27 @@ consider native mode for 0.4.1 if CPU independence matters more than continuity 
 
 ## Speed (0.4.0 inputs, 26,715,540 rows, head node, 8 threads + 8 workers)
 
-See the timing table in the PR / build reports (`*.report.json` has per-stage wall times).
+Both builds ran on the head node, 2026-11-24, at 8 processes. The load average was about 9-10 from other agents' jobs. The Python harvest also overlapped one of my Julia test builds, and the Julia cold build overlapped the allTargets regression. Treat differences under about 10 % as noise.
+
+| stage | 0.4.0 Python chain, re-run today | Julia builder, cold cache |
+|---|---|---|
+| row identity | 48.5 s (`01_build_identity.jl`) | 14.8 s |
+| mid-exposure times (144,381 files) | 1,497 s (process pool, 8) | 1,370 s (Distributed, 8 workers) |
+| almanac join, barycentric, velocities, write (`s6`) | 482 s (join 232 s, single process) | 264 s: almanac 132 s (parallel read 55 s, ordered apply 76 s), wait for astropy kernel 21 s, workup read 30 s, row stages 5 s, write 76 s |
+| `bary_flag` (`s9`) | 2.7 s | 0.4 s |
+| Galactic + `qa_bitmask` (`s10`) | 18.7 s | 2.5 s |
+| `v_rad_corr`, `offtarget` (0.4.0 copy-and-swap steps) | not re-run (0.4.0 log: 38 s for `v_rad_corr`; offtarget steps not logged) | 0.4 s, and inside the join |
+| **total** | **2,049 s** (without the copy-and-swap steps) | **1,649 s**, all 52 columns |
+| peak memory | 9.2 GB (`s6`) | 9.3 GB head + 8 x ~0.5 GB workers |
+| pass B rebuild (cache warm) | n/a | 284 s |
+
+For reference, the 0.4.0 logs show s1 91 s, s4 998 s with 12 processes, and s6 549 s.
+
+- The harvest is bound by Ceph open latency (a few % CPU per process) in both implementations. It speeds up with more processes, not more cores, so `--workers` can exceed the core count there.
+- Without the harvest, Julia is about 2x faster (279 s against 552 s).
+- The serial part left is the ordered apply of the almanac join, 76 s. It can be split by telescope, or the categorical codes can be built in a second pass, if it ever matters.
+
+Per-stage wall times of any build are in its `*.report.json` (`timing_s`).
 
 ## 0.4.1 changes (not implemented; file:line in the PR description)
 

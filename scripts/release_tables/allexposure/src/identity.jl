@@ -138,7 +138,7 @@ function save_times(path, et::ExposureTimes)
         f["tele"] = et.tele; f["mjd"] = et.mjd; f["expnum"] = et.expnum
         f["mjd_mid_exposure"] = et.mjd_mid; f["mjd_mid_exposure_precise"] = et.mjd_mid_precise
         f["nread_total"] = et.nread_total
-        f["source"] = et.source; f["status"] = et.status
+        write_fixed_strings(f, "source", et.source); write_fixed_strings(f, "status", et.status)
     end
     mv(path * ".tmp", path; force = true)
 end

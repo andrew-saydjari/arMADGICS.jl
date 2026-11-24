@@ -20,6 +20,22 @@ function write_column(f::HDF5.File, name::AbstractString, v::AbstractVector{T}, 
     return d
 end
 
+"Fixed-length NULLPAD ASCII string dataset, as numpy's `|S<n>` arrays are stored by h5py."
+function write_fixed_strings(f, name::AbstractString, v::Vector{String})
+    n = max(1, maximum(ncodeunits, v; init = 0))
+    dt = HDF5.Datatype(HDF5.API.h5t_copy(HDF5.API.H5T_C_S1))
+    HDF5.API.h5t_set_size(dt, n)
+    HDF5.API.h5t_set_strpad(dt, HDF5.API.H5T_STR_NULLPAD)
+    buf = zeros(UInt8, n * length(v))
+    for (i, s) in enumerate(v)
+        cu = codeunits(s); buf[(i-1)*n+1:(i-1)*n+length(cu)] .= cu
+    end
+    d = create_dataset(f, name, dt, dataspace((length(v),)))
+    write_dataset(d, dt, buf)
+    close(d); close(dt)
+    return nothing
+end
+
 function _vlen_utf8()
     dt = HDF5.Datatype(HDF5.API.h5t_copy(HDF5.API.H5T_C_S1))
     HDF5.API.h5t_set_size(dt, HDF5.API.H5T_VARIABLE)
