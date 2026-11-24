@@ -1,0 +1,13 @@
+# Python environment for the release-table scripts. NOT needed for a default (0.4.1) run, which is
+# all Julia. Needed only for: the 0.4.0 bit-regression (--numerics legacy040: numpy 10**x), the
+# optional astropy cross-check of the barycentric basis (--bary astropy), and the frozen reference
+# scripts in legacy_python/ and allexposure/legacy_python/. Versions = the environment that
+# reproduced 0.4.0 bit for bit (astropy 8.0.1 is also recorded in the 0.4.0 allExposure `astropy_version` attribute).
+#   uv venv --python 3.12 && uv pip install -r requirements.txt
+h5py==3.16.0
+numpy==2.5.2
+astropy==8.0.1
+pyerfa==2.0.1.5
+# bundled IERS tables; the builders pass the pinned tables of allexposure/iers/ explicitly, so this
+# version does not affect the bits
+astropy-iers-data==0.2026.8.31.0.57.9
