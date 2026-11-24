@@ -25,9 +25,14 @@ function cli()
         "--report"; default = ""; help = "output JSON build report"
         "--cache-dir"; required = true; help = "cache for identity, exposure times, kernel outputs (reused if present)"
         "--workers"; arg_type = Int; default = 0; help = "Distributed workers (0: SLURM_CPUS_ON_NODE or 8)"
-        "--python"; default = get(ENV, "RELEASE_TABLES_PYTHON", "python3"); help = "Python with numpy, h5py, astropy (legacy kernels)"
-        "--iers-a"; default = ""; help = "pin an IERS-A finals2000A file for the barycentric kernel (default: astropy IERS_Auto, as 0.4.0)"
-        "--numerics"; default = "legacy"; help = "legacy (bit-identical to 0.4.0) or native (pure Julia libm)"
+        "--iers"; default = joinpath(dirname(@__DIR__), "iers", "finals2000A.all")
+            help = "pinned IERS-A table, finals2000A format (default: the vendored allexposure/iers/finals2000A.all); never downloaded"
+        "--iers-b"; default = joinpath(dirname(@__DIR__), "iers", "eopc04.1962-now")
+            help = "pinned IERS-B table (EOP 20 C04) substituted into the A table as astropy IERS_Auto does (default: vendored); \"\" = none"
+        "--numerics"; default = "julia"
+            help = "julia (default, 0.4.1: Base.exp10, no Python) or legacy040 (numpy 10**x via Python: the 0.4.0 bit-regression only, AVX-512 CPUs)"
+        "--bary"; default = "julia"; help = "julia (default: ERFA port of astropy) or astropy (Python kernel, cross-check)"
+        "--python"; default = get(ENV, "RELEASE_TABLES_PYTHON", "python3"); help = "Python with numpy, h5py, astropy (only for --numerics legacy040 / --bary astropy)"
     end
     parse_args(s)
 end
@@ -41,7 +46,8 @@ nw > 1 && addprocs(nw; exeflags = "--project=$proj")
 cfg = BuildConfig(full_list = A["full-list"], almanac = A["almanac"], apred = A["apred"],
     workup = A["workup"], lists = A["exclusion-lists"], fiber_offsets = A["fiber-offsets"],
     offtarget = !A["no-offtarget"], out = A["out"], report = A["report"], cache = A["cache-dir"],
-    python = A["python"], iers_a = A["iers-a"],
-    numerics = A["numerics"] == "legacy" ? LegacyNumerics() : A["numerics"] == "native" ? NativeNumerics() :
-               error("--numerics must be legacy or native"))
+    python = A["python"], iers = A["iers"], iers_b = A["iers-b"],
+    bary = A["bary"] in ("julia", "astropy") ? Symbol(A["bary"]) : error("--bary must be julia or astropy"),
+    numerics = A["numerics"] == "julia" ? JuliaNumerics() : A["numerics"] == "legacy040" ? Legacy040Numerics() :
+               error("--numerics must be julia or legacy040"))
 build(cfg)

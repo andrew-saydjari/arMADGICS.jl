@@ -1,24 +1,23 @@
 # derived.jl -- the row-wise stages: barycentric correction, velocities, bary_flag, Galactic
 # coordinates, qa_bitmask, fiber zero points. All threaded over rows (no HDF5 inside the loops).
 #
-# NUMERICS. Bit-identity with 0.4.0 pins three implementation choices (README, "Numerics"):
-#   * cos/sin of the per-row target unit vector: numpy float64 cos/sin match glibc's libm bit for
-#     bit, Julia's Base.cos/sin do not always; so `LegacyNumerics` calls libm through ccall.
-#   * 10^(p*6e-6): numpy uses Intel SVML on AVX-512 hardware (1-ulp differences from correctly
-#     rounded pow in ~7% of rows); `LegacyNumerics` takes that array from the Python kernel.
-#   * Galactic: astropy goes ICRS -> FK5(J2000) -> Galactic with ERFA s2c / rxp / c2s and its own
-#     unit scalings and longitude wrapping; reproduced here with ERFA's C library (ERFA_jll).
-# `NativeNumerics` uses Base.cos/sin and Base.exp10 (pure Julia, CPU-independent); it is NOT
-# bit-identical to 0.4.0 (differences are reported by the regression in ulps).
+# NUMERICS (README, "Numerics"). Two modes; they differ only in 10^(p*6e-6):
+#   JuliaNumerics (default, 0.4.1): Base.exp10. Pure Julia, the same bits on every Rusty CPU type.
+#   Legacy040Numerics (`--numerics legacy040`, for the 0.4.0 bit-regression only): numpy's
+#     10**x, taken from the Python kernel (legacy_kernels.py pow10). numpy uses Intel SVML on
+#     AVX-512 CPUs, so this reproduces the 0.4.0 bits only on AVX-512 nodes (not on rome).
+# Both modes take cos/sin of the target direction from the C math library (glibc libm) through
+# ccall: numpy float64 cos/sin are glibc's, bit for bit, so the barycentric correction per row
+# matches 0.4.0 (Julia's Base.cos/sin changed v_barycentric_correction in 98 of 26.7 M rows).
+# Galactic coordinates: astropy goes ICRS -> FK5(J2000) -> Galactic with ERFA s2c / rxp / c2s and
+# its own unit scalings and longitude wrapping; reproduced here with ERFA's C library (ERFA_jll).
 
 abstract type Numerics end
-struct LegacyNumerics <: Numerics end
-struct NativeNumerics <: Numerics end
+struct JuliaNumerics <: Numerics end
+struct Legacy040Numerics <: Numerics end
 
-@inline _cos(::LegacyNumerics, x::Float64) = ccall(:cos, Float64, (Float64,), x)
-@inline _sin(::LegacyNumerics, x::Float64) = ccall(:sin, Float64, (Float64,), x)
-@inline _cos(::NativeNumerics, x::Float64) = cos(x)
-@inline _sin(::NativeNumerics, x::Float64) = sin(x)
+@inline _cos(::Numerics, x::Float64) = ccall(:cos, Float64, (Float64,), x)
+@inline _sin(::Numerics, x::Float64) = ccall(:sin, Float64, (Float64,), x)
 
 const C_KM_S = 299792.458
 const DELTA_LOG = 6e-6
@@ -26,13 +25,14 @@ const DEG2RAD_NP = 0.017453292519943295      # numpy.radians factor (== pi/180 i
 
 # ------------------------------------------------------------------------------ barycentric
 
-"Per-exposure basis coefficients from the Python kernel (legacy_kernels.py bary-basis)."
+"Per-exposure basis coefficients U (bary.jl, or the astropy kernel legacy_kernels.py bary-basis)."
 struct BaryBasis
     exp_key::Dict{Int,Vector{Int64}}       # tele => exposure keys (exposure_times.h5 order)
     U::Dict{Int,Matrix{Float64}}           # tele => 4 x ne
-    astropy_version::String
+    astropy_version::String                # "" when computed in Julia
     report::Dict{String,Any}
 end
+"Read the astropy kernel output (`--bary astropy`)."
 function load_basis(path)
     h5open(path, "r") do f
         ek = Dict{Int,Vector{Int64}}(); U = Dict{Int,Matrix{Float64}}(); rep = Dict{String,Any}()
@@ -78,10 +78,10 @@ end
 
 # ------------------------------------------------------------------------------ velocities
 
-"10^(p*6e-6): legacy = numpy/SVML array from the Python kernel; native = Base.exp10."
-pow10(::LegacyNumerics, p::Vector{Float64}, legacy_path::AbstractString) =
+"10^(p*6e-6): Julia = Base.exp10; legacy040 = numpy/SVML array from the Python kernel."
+pow10(::JuliaNumerics, p::Vector{Float64}, ::AbstractString) = exp10.(p .* DELTA_LOG)
+pow10(::Legacy040Numerics, p::Vector{Float64}, legacy_path::AbstractString) =
     h5open(f -> read(f["pow10"]), legacy_path, "r")
-pow10(::NativeNumerics, p::Vector{Float64}, ::AbstractString) = exp10.(p .* DELTA_LOG)
 
 "v_rel, v_rad, e_v_rad (almanac finalize_radial_velocities convention, 0.4.0 s6 op order)."
 function velocities(pw::Vector{Float64}, var::Vector{Float64}, v_bc::Vector{Float64})

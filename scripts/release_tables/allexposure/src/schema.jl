@@ -181,3 +181,40 @@ function root_attrs(astropy_version::AbstractString; with_fiber_offsets::Bool)
         "v_rad_corr_flag."))
     return a
 end
+
+"""
+Root attributes of a 0.4.1 (default-numerics) build: the 0.4.0 set with the barycentric method
+updated to say what computed it, plus the pinned IERS table (path, sha256, ranges, warnings).
+Content text otherwise unchanged (the 0.4.1 content edits listed in the PR are separate decisions).
+"""
+function root_attrs_041(; with_fiber_offsets::Bool, bary::Symbol, astropy_version::AbstractString,
+                        erfa::AbstractString, iers::AbstractDict)
+    a = root_attrs(bary === :astropy ? astropy_version : "8.0.1"; with_fiber_offsets)
+    method = bary === :astropy ?
+        "astropy SkyCoord.radial_velocity_correction(kind='barycentric'), evaluated at " *
+        "mjd_mid_exposure_precise (UTC) with EarthLocation.of_site and the pinned IERS table below; computed " *
+        "via an exact linear factorization in the target unit vector (6 basis directions per exposure)." :
+        "astropy 8.0.1 SkyCoord.radial_velocity_correction(kind='barycentric') reproduced in Julia with the " *
+        "ERFA C library (builtin ephemeris: epv00, plan94, moon98), evaluated at mjd_mid_exposure_precise (UTC) " *
+        "at the APO/LCO coordinates of astropy EarthLocation.of_site with the pinned IERS table below; " *
+        "computed via an exact linear factorization in the target unit vector (6 basis directions per " *
+        "exposure). Bit-identical to astropy 8.0.1 for all 144,381 exposures of the 0.4.0 table."
+    for (i, p) in enumerate(a)
+        p.first == "bary_method" && (a[i] = "bary_method" => FixedStr(method))
+        p.first == "astropy_version" && bary === :julia &&
+            (a[i] = "astropy_version" => FixedStr("8.0.1 (model reproduced in Julia/ERFA; astropy not run)"))
+    end
+    push!(a, "erfa_version" => FixedStr(erfa))
+    push!(a, "iers_table" => FixedStr(string(iers["recorded_path"])))
+    push!(a, "iers_table_sha256" => FixedStr(string(iers["sha256"])))
+    push!(a, "iers_b_table" => FixedStr(string(iers["recorded_path_b"])))
+    push!(a, "iers_b_table_sha256" => FixedStr(string(iers["sha256_b"])))
+    push!(a, "iers_tables_combination" => FixedStr("astropy IERS_Auto: IERS-A (finals2000A) with its Bulletin B columns replaced by the IERS-B (EOP 20 C04) values; B where present, else A"))
+    push!(a, "iers_table_mjd_range" => FixedStr(@sprintf("%.0f-%.0f; measured (non-predicted) values before MJD %.0f; final (Bulletin B / C04) values to MJD %.0f",
+        iers["first_mjd"], iers["last_mjd"], iers["predictive_mjd"], iers["last_bulletin_b_mjd"])))
+    w = iers["warnings"]
+    push!(a, "iers_table_warning" => FixedStr(isempty(w) ? "none: every exposure time is inside the measured part of the table" :
+                                              "WARNING: " * join(w, "; ")))
+    push!(a, "numerics" => FixedStr("10^x: Julia Base.exp10; cos/sin: C libm; no Python in the build"))
+    return a
+end

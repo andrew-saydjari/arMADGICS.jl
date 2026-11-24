@@ -1,7 +1,7 @@
 # 03_write_allvisitrv.jl -- write the 21-column allVisitRV file from the columns computed by
 # 02_build_visits.jl: chunk 65,536 rows, SHUFFLE + gzip 9 on every dataset, `tele` as fixed S3.
 #
-# CHAIN POSITION: allVisitRV step 3 of 4 (then 04_attrs_allvisitrv.py; the fiber-offset and
+# CHAIN POSITION: allVisitRV step 3 of 4 (then 04_attrs_allvisitrv.jl; the fiber-offset and
 #                 offtarget steps later add 4 more columns).
 # INPUTS:  ARGS[1]  v2_cols.jls from step 2
 # OUTPUTS: ARGS[2]  allVisitRV h5 (21 datasets, no attributes yet)

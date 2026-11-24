@@ -14,8 +14,8 @@
 # before `sbatch`. THREADS / WORKERS default to SLURM_CPUS_PER_TASK / SLURM_CPUS_ON_NODE.
 # The worker processes of the allExposure reads are I/O-latency bound (a few % CPU each), so
 # WORKERS may exceed the core count there.
-# NOTE: NUMERICS=legacy reproduces 0.4.0 bits only on AVX-512 CPUs (numpy SVML); rome has no
-# AVX-512, so use "[genoa|icelake]" for a bit-identity rebuild, or NUMERICS=native.
+# NOTE: the default (NUMERICS=julia) gives the same bits on every node type. NUMERICS=legacy040 (the
+# 0.4.0 bit-regression only) needs AVX-512 (numpy SVML): use "[genoa|icelake]" for it, never rome.
 set -euo pipefail
 export THREADS=${THREADS:-$SLURM_CPUS_PER_TASK}
 : "${RELEASE_TABLES_DIR:?set to the scripts/release_tables checkout (sbatch copies this file to a spool dir)}"

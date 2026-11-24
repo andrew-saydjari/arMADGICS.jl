@@ -3,7 +3,7 @@
 # Unit tests run anywhere (no cluster data). The full-table regression runs only when
 #   ALLEXPOSURE_REFERENCE=<released h5>  ALLEXPOSURE_CANDIDATE=<built h5>
 # are set; it checks every dataset bitwise (the authoritative check is
-# ../../validation/compare_h5.py, which also checks attribute string flavours and layouts).
+# ../../validation/compare_h5.jl, which also checks attribute string flavours and layouts).
 using Test, HDF5, AllExposure
 const AE = AllExposure
 
@@ -50,17 +50,52 @@ end
         @test all(isequal.(gb, fx["glat"]))
     end
 
-    @testset "libm cos/sin used by LegacyNumerics" begin
+    @testset "libm cos/sin (both numerics modes)" begin
         x = fx["ra"] .* AE.DEG2RAD_NP
-        @test all(AE._cos(AE.LegacyNumerics(), v) == ccall(:cos, Float64, (Float64,), v) for v in x)
+        for nm in (AE.JuliaNumerics(), AE.Legacy040Numerics())
+            @test all(AE._cos(nm, v) == ccall(:cos, Float64, (Float64,), v) for v in x)
+        end
     end
 
-    @testset "velocities: native numerics agree with 0.4.0 to 1e-9 km/s (not bitwise)" begin
-        pw = AE.pow10(AE.NativeNumerics(), fx["RV_pixoff_final"], "")
+    @testset "velocities: Julia exp10 agrees with 0.4.0 to 1e-9 km/s (not bitwise)" begin
+        pw = AE.pow10(AE.JuliaNumerics(), fx["RV_pixoff_final"], "")
         vrel, vrad, ev = AE.velocities(pw, fx["RV_pix_var"], fx["v_barycentric_correction"])
         ok = isfinite.(fx["v_rel"])
         @test maximum(abs.(vrel[ok] .- fx["v_rel"][ok])) < 1e-9
         @test maximum(abs.(vrad[ok] .- fx["v_rad"][ok])) < 1e-9
+    end
+
+    @testset "astropy Time day_frac / MJD -> JD" begin
+        @test AE.day_frac(2.4e6 + 0.5, 0.25) == (2.400001e6, -0.25)
+        @test AE.mjd_to_jd(60000.75) == (2.460001e6, 0.25)
+        @test AE.day_frac(0.5, 0.0) == (0.0, 0.5)              # round half to even, as numpy
+    end
+
+    iers = joinpath(@__DIR__, "..", "iers", "finals2000A.all")
+    T = AE.read_finals2000A(iers; iers_b = joinpath(@__DIR__, "..", "iers", "eopc04.1962-now"))
+    @testset "pinned IERS table" begin
+        @test T.sha256 == "e3905ff7a74b791744704aa3e900a2161e96db97a30095d8fc442b04e4cfe058"
+        @test T.sha256_b == "0ab11f18f0517f38733db9fdde4506a89ec075090110f1fd47633e48ef97ee73"
+        @test (T.first_mjd, T.last_mjd, T.predictive_mjd, T.last_bulletin_b_mjd, T.last_iers_b_mjd) ==
+              (41684.0, 61652.0, 61280.0, 61222.0, 61222.0)
+        cov = AE.eop_coverage(T, [61000.5, 61290.0])
+        @test cov.n_predicted == 1 && cov.n_after_table == 0
+        @test AE._recorded_path(iers) == "allexposure/iers/finals2000A.all"
+        # an exposure in the predicted part of the table: a Warning log line and a warning in the record
+        _, rep = @test_logs (:warn, r"PREDICTED") match_mode = :any AE.check_iers(iers,
+                     joinpath(@__DIR__, "..", "iers", "eopc04.1962-now"), [61000.5, 61290.0])
+        @test length(rep["warnings"]) == 1
+    end
+
+    @testset "barycentric basis: Julia/ERFA == astropy 8.0.1 bit for bit (240 exposures)" begin
+        lines = filter(l -> !startswith(l, "#"), readlines(joinpath(@__DIR__, "fixture_bary_040.csv")))[2:end]
+        nsame = 0
+        for l in lines
+            f = split(l, ",")
+            t = parse(Int, f[1]); mid = parse(Float64, f[3]); U = parse.(Float64, f[4:7])
+            nsame += all(AE.bary_coeffs(AE.SITES[t], T, mid) .=== Tuple(U))
+        end
+        @test nsame == length(lines) == 240
     end
 
     @testset "attribute string flavours" begin

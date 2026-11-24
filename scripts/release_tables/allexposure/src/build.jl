@@ -12,11 +12,68 @@ Base.@kwdef struct BuildConfig
     out::String
     report::String = ""
     cache::String                 # cache directory for identity / times / kernel outputs
-    python::String = "python3"
-    iers_a::String = ""           # pin an IERS-A table for the barycentric kernel ("" = astropy IERS_Auto)
+    iers::String                  # pinned IERS-A table (finals2000A format); required, never downloaded
+    iers_b::String = ""           # pinned IERS-B table (eopc04) substituted as astropy IERS_Auto does
+    bary::Symbol = :julia         # :julia (bary.jl) or :astropy (Python kernel, cross-check only)
+    python::String = "python3"    # only for numerics legacy040 or bary astropy
     kernels::String = joinpath(@__DIR__, "..", "python", "legacy_kernels.py")
-    numerics::Numerics = LegacyNumerics()
+    numerics::Numerics = JuliaNumerics()
 end
+
+"Path recorded in the product: relative to scripts/release_tables when the file is vendored there."
+function _recorded_path(p::AbstractString)
+    root = rstrip(normpath(joinpath(@__DIR__, "..", "..")), '/')
+    a = abspath(p)
+    startswith(a, root * "/") ? relpath(a, root) : a
+end
+
+"Refuse a file whose sha256 differs from a SHA256SUMS entry beside it (vendored tables)."
+function _check_sum(path::AbstractString, sha::AbstractString)
+    sums = joinpath(dirname(abspath(path)), "SHA256SUMS")
+    isfile(sums) || return nothing
+    for l in eachline(sums)
+        f = split(l)
+        length(f) == 2 && f[2] == basename(path) && f[1] != sha &&
+            error("IERS file $path: sha256 $sha does not match $sums ($(f[1]))")
+    end
+    return nothing
+end
+
+"Load the pinned IERS tables (A, and B unless empty) and check the exposure times; loud warnings, never silent."
+function check_iers(path::AbstractString, path_b::AbstractString, mjd_mid::AbstractVector{Float64})
+    for p in (path, path_b)
+        isempty(p) || isfile(p) || error("IERS file not found: $p (pass --iers / --iers-b; nothing is downloaded)")
+    end
+    isempty(path_b) && @warn "IERS: no IERS-B file given; Bulletin B columns of $path are used as is (NOT what 0.4.0 did)"
+    T = read_finals2000A(path; iers_b = path_b)
+    _check_sum(path, T.sha256)
+    isempty(path_b) || _check_sum(path_b, T.sha256_b)
+    cov = eop_coverage(T, mjd_mid)
+    warn = String[]
+    cov.n_before_table + cov.n_after_table > 0 &&
+        push!(warn, "$(cov.n_before_table + cov.n_after_table) exposure times are OUTSIDE the IERS table " *
+                    "($(T.first_mjd)-$(T.last_mjd)); astropy would hold the end values")
+    cov.n_predicted > 0 &&
+        push!(warn, "$(cov.n_predicted) exposure times are at or after MJD $(T.predictive_mjd), where the IERS " *
+                    "table holds PREDICTED (not measured) Earth orientation; use a newer table")
+    for w in warn
+        @warn "IERS: " * w
+    end
+    say(@sprintf("IERS-A %s sha256 %s: MJD %.0f-%.0f, measured (non-predicted) before %.0f, Bulletin B to %.0f",
+                 path, T.sha256, T.first_mjd, T.last_mjd, T.predictive_mjd, T.last_bulletin_b_mjd))
+    say(@sprintf("IERS-B %s sha256 %s: substituted up to MJD %.0f; exposure times %.3f-%.3f; warnings: %d",
+                 path_b, T.sha256_b, T.last_iers_b_mjd, cov.min_mjd, cov.max_mjd, length(warn)))
+    rep = Dict{String,Any}("path" => abspath(path), "recorded_path" => _recorded_path(path), "sha256" => T.sha256,
+        "bytes" => T.nbytes, "path_b" => isempty(path_b) ? "" : abspath(path_b),
+        "recorded_path_b" => isempty(path_b) ? "" : _recorded_path(path_b), "sha256_b" => T.sha256_b,
+        "first_mjd" => T.first_mjd, "last_mjd" => T.last_mjd,
+        "predictive_mjd" => T.predictive_mjd, "last_bulletin_b_mjd" => T.last_bulletin_b_mjd,
+        "last_iers_b_mjd" => T.last_iers_b_mjd,
+        "coverage" => Dict(string(k) => v for (k, v) in pairs(cov)), "warnings" => warn)
+    return T, rep
+end
+
+erfa_version() = unsafe_string(ccall((:eraVersion, LIBERFA), Cstring, ()))
 
 say(s) = (println(stdout, "[$(Dates.format(now(), "HH:MM:SS"))] ", s); flush(stdout))
 
@@ -61,13 +118,18 @@ function build(cfg::BuildConfig)
     end
     tick("times", t)
 
-    # Python kernels (legacy numerics): started now, run while the almanac join reads in parallel
-    basis_path = joinpath(cfg.cache, "bary_basis.h5")
+    # barycentric basis per exposure, from the pinned IERS table: Julia (default) or the astropy
+    # kernel (cross-check); numpy pow10 kernel only for legacy040. Python kernels run while the
+    # almanac join reads in parallel; their outputs are cached under names that carry the table hash.
+    T_eop, iers_rep = check_iers(cfg.iers, cfg.iers_b, et.mjd_mid_precise[et.status .== "ok"])
     pow_path = joinpath(cfg.cache, "pow10.h5")
+    basis_path = joinpath(cfg.cache, "bary_basis_astropy_$(first(T_eop.sha256, 12))_$(first(T_eop.sha256_b, 12)).h5")
     t = time()
     ktask = @async begin
-        _run_kernel(cfg, vcat(["bary-basis", "--times", tpath], isempty(cfg.iers_a) ? String[] : ["--iers-a", cfg.iers_a]), basis_path)
-        cfg.numerics isa LegacyNumerics && _run_kernel(cfg, ["pow10", "--workup", cfg.workup], pow_path)
+        cfg.bary === :astropy &&
+            _run_kernel(cfg, vcat(["bary-basis", "--times", tpath, "--iers-a", cfg.iers],
+                                  isempty(cfg.iers_b) ? String[] : ["--iers-b", cfg.iers_b]), basis_path)
+        cfg.numerics isa Legacy040Numerics && _run_kernel(cfg, ["pow10", "--workup", cfg.workup], pow_path)
         nothing
     end
 
@@ -87,7 +149,16 @@ function build(cfg::BuildConfig)
     tick("mid_time", t)
 
     t = time(); wait(ktask); tick("kernels_wait", t)
-    B = load_basis(basis_path)
+    t = time()
+    B = if cfg.bary === :astropy
+        load_basis(basis_path)
+    elseif cfg.bary === :julia
+        ek, U = @stage "barycentric basis (Julia/ERFA)" bary_basis_julia(et, T_eop)
+        BaryBasis(ek, U, "", Dict{String,Any}(tn => Dict("n_exposures" => length(ek[tc])) for (tc, tn) in TELENAME))
+    else
+        error("bary must be :julia or :astropy")
+    end
+    tick("bary_basis", t)
     ra = C.f64["ra"]; dec = C.f64["dec"]
     t = time(); v_bc = @stage "barycentric" barycentric(cfg.numerics, B, id, ra, dec); tick("bary", t)
 
@@ -126,7 +197,14 @@ function build(cfg::BuildConfig)
     end
     cfg.offtarget && (cols["offtarget"] = C.offtarget)
 
-    t = time(); @stage "write" write_table(cfg.out, cols, C.codes, root_attrs(B.astropy_version; with_fiber_offsets = with_off), N); tick("write", t)
+    rattrs = if cfg.numerics isa Legacy040Numerics
+        # 0.4.0 regression: exactly the 0.4.0 root attributes (the IERS record goes to the log and report)
+        root_attrs(isempty(B.astropy_version) ? "8.0.1" : B.astropy_version; with_fiber_offsets = with_off)
+    else
+        root_attrs_041(; with_fiber_offsets = with_off, bary = cfg.bary, astropy_version = B.astropy_version,
+                       erfa = erfa_version(), iers = iers_rep)
+    end
+    t = time(); @stage "write" write_table(cfg.out, cols, C.codes, rattrs, N); tick("write", t)
     timing["total"] = time() - T0
 
     rep = Dict(
@@ -135,7 +213,8 @@ function build(cfg::BuildConfig)
         "era" => Dict(string(k) => count(==(UInt8(k)), C.era) for k in 0:2),
         "sdss_id_agrees" => Dict(string(k) => count(==(UInt8(k)), C.sdss_id_agrees) for k in 0:3),
         "n_finite_vbary" => count(isfinite, v_bc), "n_finite_mid" => count(isfinite, mjd_mid),
-        "bary" => B.report, "bary_flag_bad_time_exposures" => nbad,
+        "bary" => B.report, "bary_source" => string(cfg.bary), "erfa_version" => erfa_version(),
+        "iers" => iers_rep, "bary_flag_bad_time_exposures" => nbad,
         "bary_flag" => Dict(n => count(x -> x & b != 0, bflag) for (n, b) in
                             (("NO_BARY", NO_BARY), ("BAD_TIME", BAD_TIME), ("ID_MISMATCH", ID_MISMATCH), ("NO_RV", NO_RV))),
         "qa_bits" => Dict(n => count(x -> x & b != 0, qa) for (n, b) in

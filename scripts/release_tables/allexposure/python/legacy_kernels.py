@@ -19,7 +19,7 @@ defined by library implementations that have no bit-identical Julia equivalent:
               reproduce 0.4.0; the same holds for this kernel.
 
 INPUTS / OUTPUTS:
-  bary-basis --times exposure_times.h5 --out bary_basis.h5 [--iers-a finals2000A.all]
+  bary-basis --times exposure_times.h5 --out bary_basis.h5 --iers-a finals2000A.all [--iers-b eopc04.1962-now]
       out: per telescope group "<tele>/" with exp_key (int64, tele*1e12+mjd*1e6+expnum, in
       exposure_times.h5 order), U (4 x ne float64), plus attrs astropy_version and the basis residual.
   pow10 --workup DIR --out pow10.h5
@@ -50,7 +50,7 @@ def as_str(a):
     return a.astype(str)
 
 
-def bary_basis(times, out, iers_a=""):
+def bary_basis(times, out, iers_a="", iers_b=""):
     import hashlib
     import astropy
     from astropy.utils import iers
@@ -73,21 +73,29 @@ def bary_basis(times, out, iers_a=""):
     Amat = np.hstack([np.ones((6, 1)), BAS])
     Apinv = np.linalg.pinv(Amat)
 
-    # Earth-orientation table: astropy's IERS_Auto by default (what 0.4.0 used; its table state at
-    # run time is NOT recorded in 0.4.0), or a pinned IERS-A file. Either way the table used is
-    # recorded so the barycentric bits can be reproduced later.
-    if iers_a:
+    # Earth-orientation table: an explicit IERS-A file (finals2000A format), never astropy's
+    # IERS_Auto, and nothing is downloaded at run time (auto_download off also covers the leap-second
+    # table). 0.4.0 used IERS_Auto without recording the tables; its values are reproduced exactly by
+    # finals2000A.all + eopc04.1962-now of astropy-iers-data 0.2026.9.7.0.56.14 (vendored in ../iers/)
+    # with the IERS_Auto B substitution.
+    iers.conf.auto_download = False
+    if not iers_a:
+        raise SystemExit("bary-basis: --iers-a is required (pinned IERS table; no run-time downloads)")
+    if iers_b:
+        # astropy IERS_Auto semantics (what 0.4.0 used): Bulletin B columns replaced by the IERS-B table
+        iers.IERS_B.iers_table = iers.IERS_B.read(iers_b)
+        iers.earth_orientation_table.set(iers.IERS_Auto.read(iers_a))
+    else:
         iers.earth_orientation_table.set(iers.IERS_A.open(iers_a))
-    tab = iers.earth_orientation_table.get()
-    src = str(tab.meta.get("data_path", "") or iers_a or "unknown")
-    try:
-        sha = hashlib.sha256(open(src, "rb").read()).hexdigest()
-    except OSError:
-        sha = ""
+    src = iers_a
+    sha = hashlib.sha256(open(src, "rb").read()).hexdigest()
+    sha_b = hashlib.sha256(open(iers_b, "rb").read()).hexdigest() if iers_b else ""
     with h5py.File(out, "w") as g:
         g.attrs["astropy_version"] = astropy.__version__
         g.attrs["iers_table"] = src
         g.attrs["iers_table_sha256"] = sha
+        g.attrs["iers_b_table"] = iers_b
+        g.attrs["iers_b_table_sha256"] = sha_b
         for t in (1, 2):
             m_et = (et_tele == t) & (et_status == "ok") & np.isfinite(et_mid)
             exp_mid = et_mid[m_et]
@@ -138,14 +146,15 @@ def main():
     a = sub.add_parser("bary-basis")
     a.add_argument("--times", required=True)
     a.add_argument("--out", required=True)
-    a.add_argument("--iers-a", default="", help="pin an IERS-A finals2000A file (default: astropy IERS_Auto)")
+    a.add_argument("--iers-a", required=True, help="pinned IERS-A finals2000A file (required)")
+    a.add_argument("--iers-b", default="", help="pinned IERS-B eopc04 file (IERS_Auto substitution, as 0.4.0)")
     b = sub.add_parser("pow10")
     b.add_argument("--workup", required=True)
     b.add_argument("--out", required=True)
     args = ap.parse_args()
     t0 = time.time()
     if args.cmd == "bary-basis":
-        bary_basis(args.times, args.out, args.iers_a)
+        bary_basis(args.times, args.out, args.iers_a, args.iers_b)
     else:
         pow10(args.workup, args.out)
     print(f"{args.cmd} done in {time.time()-t0:.0f}s", flush=True)

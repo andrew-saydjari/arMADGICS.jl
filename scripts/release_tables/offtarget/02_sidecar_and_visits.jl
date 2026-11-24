@@ -1,6 +1,6 @@
 #= 02_sidecar_and_visits.jl
    CHAIN POSITION: offtarget step 2 of 3 (after the allExposure build and 01_almanac_scan.jl,
-     before 03_stage_allvisitrv.py).
+     before 03_stage_allvisitrv.jl).
    INPUTS:  ARGS[1] final allExposure (with `offtarget`), ARGS[2] allVisitRV (24 columns),
             ARGS[3] almanac_fps_flags.h5 from step 1
    OUTPUTS: ARGS[4] offtarget_exposures.csv (released sidecar), ARGS[5] offtarget_visit_flag.h5

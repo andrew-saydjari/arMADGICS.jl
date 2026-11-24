@@ -15,5 +15,6 @@
 *.tmp-*
 # small committed fixtures and reference inputs (each < 100 kB)
 !allexposure/test/fixture_rows_040.csv
+!allexposure/test/fixture_bary_040.csv
 !alltargets/reference/targetdb_carton.csv
 !alltargets/reference/sdss5_target_4_with_groups.csv

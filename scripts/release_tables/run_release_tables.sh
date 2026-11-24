@@ -20,9 +20,13 @@
 #   WAVECAL_DIR + TRACE_CSV  inputs to exclusions/build_exclusion_lists.jl (written to $OUTDIR)
 # Optional:
 #   FIBER_OFFSETS  existing fiber_offsets.csv: skip the solve and use it
-#   IERS_A         pin an IERS-A finals2000A file for the barycentric correction (recommended)
-#   NUMERICS       legacy (default; bit-identical to 0.4.0 on AVX-512 CPUs) | native
-#   PYTHON         Python with requirements.txt installed (default: python3)
+#   IERS, IERS_B   pinned Earth-orientation tables: IERS-A (finals2000A format) and IERS-B (eopc04),
+#                  combined as astropy IERS_Auto does (defaults: the vendored allexposure/iers/finals2000A.all
+#                  and eopc04.1962-now, sha256 in allexposure/iers/SHA256SUMS). Never downloaded.
+#   NUMERICS       julia (default, 0.4.1: pure Julia, no Python anywhere in the chain) |
+#                  legacy040 (numpy 10**x through Python: ONLY for the 0.4.0 bit-regression, AVX-512 CPUs)
+#   BARY           julia (default) | astropy (Python astropy kernel, cross-check only)
+#   PYTHON         Python with requirements.txt installed; only needed for NUMERICS=legacy040 or BARY=astropy
 #   THREADS        Julia threads (default: SLURM_CPUS_PER_TASK, else 8)
 #   WORKERS        Distributed workers for the allExposure reads (default: SLURM_CPUS_ON_NODE, else 8)
 #   STEPS          space-separated subset of: identity exclusions allexposure_a allvisitrv
@@ -31,15 +35,18 @@
 #
 # Slurm: this script never submits anything. For a batch run, wrap it in an sbatch script with
 #   #SBATCH --constraint="[genoa|icelake|rome]"  and --cpus-per-task / --mem set (README.md).
-#   NOTE: NUMERICS=legacy reproduces 0.4.0 bits only on AVX-512 CPUs (numpy uses Intel SVML there);
-#   rome nodes have no AVX-512.
+#   NOTE: NUMERICS=legacy040 reproduces 0.4.0 bits only on AVX-512 CPUs (numpy uses Intel SVML there);
+#   rome nodes have no AVX-512. The default (julia) gives the same bits on every Rusty CPU type.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 : "${RELEASE:?}" "${NAME:?}" "${OUTDIR:?}" "${WORKDIR:?}" "${FULL_LIST:?}" "${ALMANAC:?}" "${APRED:?}" "${WORKUP:?}"
 PYTHON=${PYTHON:-python3}
 THREADS=${THREADS:-${SLURM_CPUS_PER_TASK:-8}}
 WORKERS=${WORKERS:-${SLURM_CPUS_ON_NODE:-8}}
-NUMERICS=${NUMERICS:-legacy}
+NUMERICS=${NUMERICS:-julia}
+BARY=${BARY:-julia}
+IERS=${IERS:-$HERE/allexposure/iers/finals2000A.all}
+IERS_B=${IERS_B-$HERE/allexposure/iers/eopc04.1962-now}
 STEPS=${STEPS:-"identity exclusions allexposure_a allvisitrv fiber_offsets allexposure offtarget alltargets cuts"}
 # Ceph + HDF5: same settings as the workup's run_workup.sh (lazy I/O, no POSIX file locking)
 export CEPHTWEAKS_LAZYIO=${CEPHTWEAKS_LAZYIO:-1}
@@ -75,7 +82,7 @@ build_ae() {   # $1 = output, rest = extra args
     $JA -t "$THREADS" "$HERE/allexposure/bin/build_allexposure.jl" \
         --full-list "$FULL_LIST" --almanac "$ALMANAC" --apred "$APRED" --workup "$WORKUP" \
         --exclusion-lists "$LISTS" --cache-dir "$WORKDIR/cache" --workers "$WORKERS" \
-        --python "$PYTHON" --numerics "$NUMERICS" ${IERS_A:+--iers-a "$IERS_A"} \
+        --python "$PYTHON" --numerics "$NUMERICS" --bary "$BARY" --iers "$IERS" --iers-b "$IERS_B" \
         --out "$out" --report "${out%.h5}.report.json" "$@"
 }
 
@@ -92,7 +99,7 @@ if want allvisitrv; then
     $JP -t "$THREADS" "$HERE/allvisitrv/02_build_visits.jl" --allexposure "$WORKDIR/allExposure_A.h5" \
         --seqmap "$WORKDIR/visits/seqmap.jls" --out "$WORKDIR/visits/v2_cols.jls"
     $JP "$HERE/allvisitrv/03_write_allvisitrv.jl" "$WORKDIR/visits/v2_cols.jls" "$WORKDIR/visits/allVisitRV_21.h5"
-    $PYTHON -I "$HERE/allvisitrv/04_attrs_allvisitrv.py" "$WORKDIR/allExposure_A.h5" "$WORKDIR/visits/allVisitRV_21.h5"
+    $JP "$HERE/allvisitrv/04_attrs_allvisitrv.jl" "$WORKDIR/allExposure_A.h5" "$WORKDIR/visits/allVisitRV_21.h5"
 fi
 
 if want fiber_offsets; then
@@ -126,12 +133,12 @@ if want offtarget; then
     $JP "$HERE/offtarget/01_almanac_scan.jl" "$ALMANAC" "$O/almanac_fps_flags.h5"
     $JP "$HERE/offtarget/02_sidecar_and_visits.jl" "$AE_OUT" "$WORKDIR/visits/allVisitRV_24.h5" \
         "$O/almanac_fps_flags.h5" "$OUTDIR/offtarget_exposures.csv" "$O/offtarget_visit_flag.h5"
-    $PYTHON -I "$HERE/offtarget/03_stage_allvisitrv.py" --src "$WORKDIR/visits/allVisitRV_24.h5" \
+    $JP "$HERE/offtarget/03_stage_allvisitrv.jl" --src "$WORKDIR/visits/allVisitRV_24.h5" \
         --flag "$O/offtarget_visit_flag.h5" --dst "$AV_OUT"
 fi
 
 if want restrict_ids; then
-    $PYTHON -I "$HERE/metadata/make_restrict_ids.py" "$AE_OUT" "$WORKDIR/sdss_id_restrict.npy"
+    $JP "$HERE/metadata/make_restrict_ids.jl" "$AE_OUT" "$WORKDIR/sdss_id_restrict.npy"
     log "next: metadata/build_metadata.sh $ALMANAC $WORKDIR/sdss_id_restrict.npy <meta workdir> (needs the SDSS database)"
 fi
 
@@ -146,6 +153,6 @@ if want alltargets; then
 fi
 
 if want cuts; then
-    $PYTHON -I "$HERE/cuts/recommended_cuts.py" "$AE_OUT"
+    $JP "$HERE/cuts/recommended_cuts.jl" "$AE_OUT"
 fi
 log "done; products in $OUTDIR"

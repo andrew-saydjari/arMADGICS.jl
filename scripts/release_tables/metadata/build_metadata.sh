@@ -3,7 +3,7 @@
 # /meta_not_found, /meta_carton_pks) using `almanac add metadata`, restricted to the release's
 # allExposure sdss_id set. Resumable: re-run the same command after an interruption.
 #
-# CHAIN POSITION: metadata step 2 of 2 (after make_restrict_ids.py; before alltargets/).
+# CHAIN POSITION: metadata step 2 of 2 (after make_restrict_ids.jl; before alltargets/).
 # SOURCE: work/2026_11_18/targets_040/scripts/build_040.sh + RUN_INFO.txt (0.4.0). For 0.4.0 the
 #   code was the almanac fork's `metadata-resumable` branch (PR #14) at commit
 #   4e3c218de6998355b452a39f9ff7363f0ff61375, Python 3.12.11, sdss-semaphore 0.2.8, 8 query
