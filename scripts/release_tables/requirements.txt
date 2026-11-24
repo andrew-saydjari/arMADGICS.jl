@@ -1,0 +1,11 @@
+# Python environment for the release-table scripts (legacy allExposure chain, the two legacy
+# numerics kernels of the Julia allExposure builder, allVisitRV attributes, offtarget staging,
+# validation). Versions = the environment that reproduced 0.4.0 bit for bit (astropy 8.0.1 is
+# also recorded in the 0.4.0 allExposure `astropy_version` attribute).
+#   uv venv --python 3.12 && uv pip install -r requirements.txt
+h5py==3.16.0
+numpy==2.5.2
+astropy==8.0.1
+pyerfa==2.0.1.5
+# IERS tables used by the barycentric correction; a different version can change v_barycentric_correction bits
+astropy-iers-data==0.2026.8.31.0.57.9

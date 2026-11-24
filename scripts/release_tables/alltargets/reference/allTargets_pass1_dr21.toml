@@ -1,0 +1,142 @@
+# DRAFT curated column registry: allTargets_pass1_dr21.h5
+# For arMADGICS.jl PR #43 (datamodel/registry/). Not yet in releases/0.4.0.toml; see the
+# [[products]] stanza at the end of this file for what to add there once the file is installed.
+# Columns with no `description` here fall back to the dataset's own `description` attribute.
+
+[product]
+title = "Target metadata (photometry, astrometry, catalog ids, targeting)"
+summary = "One row per star (sdss_id) in allExposure: Gaia DR3 astrometry and photometry, 2MASS JHK, catalog cross-match ids, SDSS-V carton flags."
+general_description = """
+A companion to `allExposure_pass1_dr21.h5` and `allVisitRV_pass1_dr21.h5`, keyed by `sdss_id`. It holds the target metadata that 0.4.0 shipped without: Gaia DR3 positions, parallaxes, proper motions and photometry; 2MASS J, H, Ks with quality flags; catalog cross-match identifiers; and SDSS-V targeting (carton) information. Join on `sdss_id`; do not expect row alignment with allExposure.
+
+The values come from the SDSS-V operations database (catalogdb / targetdb) through `almanac add metadata` (almanac fork PR #14), run on a copy of the pass-1 almanac file and restricted to the `sdss_id` in allExposure. Gaia and 2MASS values are those of the sources cross-matched to the `sdss_id` in `catalogdb.sdss_id_to_catalog`; no new cross-match is done here.
+"""
+naming_convention = "`allTargets_pass1_dr21.h5`: one file for the whole release."
+row_definition = "one row per sdss_id > 0 present in allExposure_pass1_dr21.h5, sorted by sdss_id; sdss_id is unique"
+written_by = ["almanac add metadata (fork PR #14) -> 2026_11_19/carton_flags/build_allTargets.jl"]
+read_by = ["user analysis"]
+notes = """
+`catalogid` and `version_id` are those of one of the `sdss_id_to_catalog` rows for the `sdss_id` (an `sdss_id` can map to several catalogids across cross-match versions); they are not a chosen "best" catalogid.
+
+`sdss5_target_flags` is the sdss_semaphore `TargetingFlags` bit array with carton-to-bit mapping version 4 (sdss-semaphore 0.2.9, its default; 73 bytes per star). Decode with `TargetingFlags(array, sdssc2bv=4)`; version 4 only appends bits 563-577 to version 3, so older readers decode bits 0-562 the same way. A semaphore bit belongs to one carton_pk, while one carton name exists under several targeting plans with different pks. A pair whose pk has a bit sets that bit; a pair whose pk has none sets the bit of a same-name pk that has one (no new bits are assigned); these rows have `metadata_status` bit 6 (`CARTON_BY_NAME`): decoding by carton name, program or mapper is right for them, decoding by carton_pk is not. Cartons whose name has no bit at all (80 names, mostly `ops_*_brightneighbors` and newer-plan MWM cartons such as `mwm_galactic_core_dist`, `mwm_bin_rv_short`, `mwm_tess_rgb`) are not encoded; those rows have bit 5 (`UNKNOWN_CARTON`). Every carton the database returned is in the `carton_pks/` group as (`sdss_id`, `carton_pk`, `bit`, `bit_source`) with `bit_source` 0 none, 1 exact pk, 2 by name; `carton_table/` gives each pk's name, program, mapper, plan and resolved bit.
+
+Strings are variable-length UTF-8. `gaia_duplicated_source` and `too` are 0/1 integers. Datasets with at least 65,536 rows are chunked at 65,536 rows with the shuffle filter and gzip level 4.
+"""
+column_order = [
+  "sdss_id", "catalogid", "version_id", "lead",
+  "gaia_dr3_source", "twomass_psc", "twomass_designation", "tic_v8", "allstar_dr17_synspec_rev1",
+  "gaia_ra", "gaia_ra_error", "gaia_dec", "gaia_dec_error",
+  "gaia_parallax", "gaia_parallax_error", "gaia_pmra", "gaia_pmra_error", "gaia_pmdec", "gaia_pmdec_error",
+  "gaia_ruwe", "gaia_duplicated_source",
+  "gaia_phot_g_mean_mag", "gaia_phot_bp_mean_mag", "gaia_phot_rp_mean_mag", "gaia_phot_bp_rp_excess_factor",
+  "gaia_radial_velocity", "gaia_radial_velocity_error",
+  "twomass_j_m", "twomass_j_msigcom", "twomass_h_m", "twomass_h_msigcom", "twomass_k_m", "twomass_k_msigcom",
+  "twomass_ph_qual", "twomass_rd_flg", "twomass_bl_flg", "twomass_cc_flg",
+  "sdss5_target_flags", "n_cartons", "too", "too_id", "too_program",
+  "n_exposures", "metadata_status",
+]
+examples = """
+Julia:
+
+```
+using HDF5
+t = h5open("data/work/mwm/0.4.0/public/allTargets_pass1_dr21.h5", "r")
+sid, plx, G = read(t["sdss_id"]), read(t["gaia_parallax"]), read(t["gaia_phot_g_mean_mag"])
+e = h5open("data/work/mwm/0.4.0/public/allExposure_pass1_dr21.h5", "r")
+row = searchsortedfirst.(Ref(sid), read(e["sdss_id"]))   # allExposure row -> allTargets row (sdss_id > 0)
+```
+
+Python:
+
+```
+import h5py, numpy as np
+with h5py.File("data/work/mwm/0.4.0/public/allTargets_pass1_dr21.h5", "r") as t:
+    sid = t["sdss_id"][:]; plx = t["gaia_parallax"][:]; ok = (t["metadata_status"][:] & 0b0110) == 0   # found, with Gaia
+```
+"""
+
+[product.attr_notes]
+meta_almanac_commit = "almanac commit that built /meta."
+meta_database_host = "Database the metadata was read from (host:port as seen from the build host; through an SSH tunnel)."
+meta_query_start_utc = "Start of the database queries (UTC)."
+meta_query_end_utc = "End of the database queries (UTC)."
+status_bits = "JSON list of the metadata_status bits."
+sdss_semaphore_version = "sdss-semaphore release the carton-to-bit mapping comes from."
+sdss_semaphore_mapping_version = "SDSSC2BV mapping version used for sdss5_target_flags (pass as sdssc2bv when decoding)."
+flags_rule = "How sdss5_target_flags was built from the carton pairs (exact pk, then same carton name, else not encoded)."
+meta_sdss_semaphore_version = "sdss-semaphore version almanac used for /meta; its /meta flags column is NOT used in this file."
+
+[columns.sdss_id]
+description = "SDSS-V target identifier, as in allExposure_pass1_dr21.h5. Always > 0; unique."
+
+[columns.catalogid]
+description = "catalogid of one `catalogdb.sdss_id_to_catalog` row for this sdss_id (version not chosen; see `version_id`). -1 if not found."
+
+[columns.version_id]
+description = "Cross-match version of `catalogid`. -1 if not found."
+
+[columns.lead]
+description = "Lead catalog of the cross-match (e.g. `gaia_dr3_source`, `twomass_psc`)."
+
+[columns.gaia_dr3_source]
+description = "Gaia DR3 source_id cross-matched to this sdss_id; -1 if none."
+
+[columns.twomass_psc]
+description = "2MASS PSC `pts_key`; -1 if none."
+
+[columns.twomass_designation]
+description = "2MASS PSC designation (hhmmssss+ddmmsss); empty if none."
+
+[columns.tic_v8]
+description = "TESS Input Catalog v8 ID; -1 if none."
+
+[columns.allstar_dr17_synspec_rev1]
+description = "APOGEE DR17 allStar identifier (synspec_rev1) cross-matched to this sdss_id; empty if none."
+
+[columns.gaia_ra]
+units = "deg"
+description = "Gaia DR3 right ascension (ICRS, epoch J2016.0). NaN if no Gaia match."
+
+[columns.gaia_dec]
+units = "deg"
+description = "Gaia DR3 declination (ICRS, epoch J2016.0). NaN if no Gaia match."
+
+[columns.gaia_parallax]
+units = "mas"
+description = "Gaia DR3 parallax (no zero-point correction applied). NaN if not available."
+
+[columns.gaia_ruwe]
+description = "Gaia DR3 renormalised unit weight error."
+
+[columns.twomass_ph_qual]
+description = "2MASS photometric quality flag, one character per band (J, H, Ks)."
+
+[columns.twomass_cc_flg]
+description = "2MASS contamination and confusion flag, one character per band."
+
+[columns.sdss5_target_flags]
+units = "bit array"
+description = "SDSS-V targeting bits from sdss_semaphore `TargetingFlags`, mapping version 4 (73 bytes per star in Julia order (73, N)). Decode with sdss_semaphore, sdssc2bv=4. Bits are set by exact carton_pk or, where the pk has no bit, by carton name (metadata_status bit 6). Carton names with no bit are not encoded; see `carton_pks/` and metadata_status bit 5."
+
+[columns.n_cartons]
+description = "Number of SDSS-V carton assignments for this sdss_id (rows in `carton_pks/`)."
+
+[columns.too]
+description = "Target of opportunity (FPS era), 0/1."
+
+[columns.n_exposures]
+description = "Number of rows (exposure x fiber) for this sdss_id in allExposure_pass1_dr21.h5."
+
+[columns.metadata_status]
+description = "Bitmask, 0 = everything found. Bit 0 NOT_QUERIED (only in partial builds; never in the release file); 1 NOT_FOUND (no catalogdb.sdss_id_to_catalog row: all metadata columns are fill values); 2 NO_GAIA_DR3; 3 NO_2MASS; 4 NO_CARTON; 5 UNKNOWN_CARTON (a carton whose name has no bit in sdss_semaphore mapping 4, not encoded in sdss5_target_flags); 6 CARTON_BY_NAME (a carton encoded with the bit of the same carton name from another targeting plan)."
+
+# --- to add to datamodel/releases/0.4.0.toml once the file is installed ---
+# [[products]]
+# name = "allTargets_pass1_dr21"
+# kind = "hdf5_table"
+# source = "data/work/mwm/0.4.0/public/allTargets_pass1_dr21.h5"
+# public_path = "public/allTargets_pass1_dr21.h5"
+# registry = "allTargets_pass1_dr21.toml"
+#
+# --- and in allExposure_pass1_dr21.toml / allVisitRV_pass1_dr21.toml notes ---
+# "Per-star metadata (Gaia, 2MASS, cartons) is in allTargets_pass1_dr21.h5; join on sdss_id."

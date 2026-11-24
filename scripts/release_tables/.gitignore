@@ -1,0 +1,19 @@
+# Release-table OUTPUTS are products: never commit them. Every script writes to a path given on
+# the command line; these rules catch anything written here by accident.
+*.h5
+*.hdf5
+*.fits
+*.fits.gz
+*.npy
+*.npz
+*.parquet
+*.jls
+*.csv
+*.csv.gz
+*.log
+*.tmp
+*.tmp-*
+# small committed fixtures and reference inputs (each < 100 kB)
+!allexposure/test/fixture_rows_040.csv
+!alltargets/reference/targetdb_carton.csv
+!alltargets/reference/sdss5_target_4_with_groups.csv
